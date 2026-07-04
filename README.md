@@ -86,3 +86,4 @@ app/
 uploads/              Yüklenen fotoğraflar
 ```
 # trendyol_ai_panel
+# trendyol_ai_panel

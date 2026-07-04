@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "WebSearch",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -c \"import app.main; print\\('import OK'\\)\")",
+      "Bash(lsof -iTCP:8000 -iTCP:8123 -sTCP:LISTEN -P)",
+      "Bash(kill 58429 12834 15476)",
+      "Bash(lsof -iTCP:8000 -iTCP:8090 -sTCP:LISTEN -P)",
+      "Bash(.venv/bin/uvicorn app.main:app --port 8000)",
+      "Bash(curl -s http://127.0.0.1:8000/api/status)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/analyze -F 'file=@/private/tmp/claude-501/-Users-bedirhan-Desktop-TRENDYOL-AGENT/061f17f2-351b-41d5-95e8-05b3d1e4acfc/scratchpad/test_urun.png;type=image/png')",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/publish -H \"Content-Type: application/json\" -d @-)",
+      "Bash(open *)",
+      "Bash(.venv/bin/pip uninstall *)",
+      "Bash(.venv/bin/python -W ignore -c ' *)",
+      "Skill(run)",
+      "Bash(.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s -o /dev/null -w \"ana sayfa: HTTP %{http_code}\\\\n\" http://127.0.0.1:8000/)",
+      "Bash(lsof *)",
+      "Bash(ps -p 61191 -o pid,lstart,command)",
+      "Bash(S=/private/tmp/claude-501/-Users-bedirhan-Desktop-TRENDYOL-AGENT/5e513d08-2ac8-49bc-b151-9f5696bb28ee/scratchpad; time curl -s -F \"file=@$S/mug.jpg;type=image/jpeg\" http://127.0.0.1:8000/api/analyze -o \"$S/analyze_result.json\" -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/publish -H 'Content-Type: application/json' -d @/private/tmp/claude-501/-Users-bedirhan-Desktop-TRENDYOL-AGENT/5e513d08-2ac8-49bc-b151-9f5696bb28ee/scratchpad/draft.json)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8000/)",
+      "Bash(curl -s http://127.0.0.1:8000/api/categories)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/recategorize -H 'Content-Type: application/json' -d '{\"image_filename\":\"yok.jpg\",\"category_id\":1013}')",
+      "Bash(curl -s -o /dev/null -w \"GET / -> %{http_code}\\\\n\" http://127.0.0.1:8000/)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/plan-scenes -H 'Content-Type: application/json' -d '{\"image_filename\":\"olmayan.jpg\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/plan-scenes -H 'Content-Type: application/json' -d '{\"image_filename\":\"../../../etc/passwd\"}')",
+      "Bash(python3 -c \"import json,sys; cats=json.load\\(sys.stdin\\); print\\(len\\(cats\\), 'kategori'\\); [print\\(' ', c['name']\\) for c in cats if 'İç Giyim' in c['name']]\")",
+      "Bash(chmod +x \"/Users/bedirhan/Desktop/TRENDYOL AGENT/run.sh\")",
+      "Bash(bash -n \"/Users/bedirhan/Desktop/TRENDYOL AGENT/run.sh\")"
+    ]
+  }
+}
