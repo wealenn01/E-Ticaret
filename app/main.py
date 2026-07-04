@@ -13,10 +13,12 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.genai import errors as genai_errors
+from pydantic import BaseModel
 
 load_dotenv()
 
 from . import ai_agent  # noqa: E402  (load_dotenv önce çalışmalı)
+from . import ai_seller  # noqa: E402
 from .models import (  # noqa: E402
     GenerateImageRequest,
     ProductAnalysis,
@@ -32,8 +34,9 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="Trendyol Listeleme Agent'ı")
+app = FastAPI(title="TrendolAi — Trendyol Satış Paneli")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 trendyol = TrendyolClient(
     seller_id=os.getenv("TRENDYOL_SELLER_ID", ""),
@@ -129,6 +132,11 @@ async def unhandled_error_handler(request: Request, exc: Exception):
 @app.get("/")
 def index():
     return FileResponse(BASE_DIR / "static" / "index.html")
+
+
+@app.get("/panel")
+def panel():
+    return FileResponse(BASE_DIR / "static" / "panel.html")
 
 
 @app.get("/api/status")
@@ -310,6 +318,184 @@ def _demo_analysis(filename: str) -> dict:
         "category_reasoning": "DEMO: Gemini anahtarı olmadığı için örnek kategori seçildi.",
         "estimated_range": [200, 350],
     }
+
+
+# ---- Mağaza Asistanı (otomasyonv3 entegrasyonu) ----
+
+class AskRequest(BaseModel):
+    question: str
+    sku: Optional[str] = None
+
+
+class SettingsRequest(BaseModel):
+    platform: Optional[str] = None
+    seller_model: Optional[str] = None
+
+
+class ScrapeRequest(BaseModel):
+    url: str
+
+
+class ReplyRequest(BaseModel):
+    product_name: str = ""
+    rating: int = 3
+    comment_text: str = ""
+
+
+@app.post("/api/assistant/import-reviews")
+async def import_reviews(file: UploadFile):
+    """Yorum CSV'si yükler: product_name,sku,rating,comment_text,review_date"""
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(400, "Lütfen .csv uzantılı bir dosya yükleyin.")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(400, "CSV 5 MB'dan küçük olmalı.")
+    try:
+        result = ai_seller.import_reviews_csv(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result
+
+
+@app.delete("/api/assistant/reviews")
+def delete_reviews():
+    ai_seller.clear_reviews()
+    return {"ok": True}
+
+
+@app.get("/api/assistant/stats")
+def assistant_stats(platform: Optional[str] = None):
+    p = platform or ai_seller.load_settings().get("platform", "trendyol")
+    return ai_seller.compute_stats(ai_seller.load_reviews(), p)
+
+
+@app.get("/api/assistant/products")
+def assistant_products(platform: Optional[str] = None):
+    """Ürün özetleri — resim, yorum örnekleri (otomasyonv3 product_summary)."""
+    return ai_seller.get_product_summaries(platform)
+
+
+@app.get("/api/assistant/settings")
+def get_assistant_settings():
+    return ai_seller.load_settings()
+
+
+@app.post("/api/assistant/settings")
+def update_assistant_settings(req: SettingsRequest):
+    data = {}
+    if req.platform in ("trendyol", "hepsiburada", "n11", "amazon"):
+        data["platform"] = req.platform
+    if req.seller_model in ("manufacturer", "reseller", None):
+        data["seller_model"] = req.seller_model
+    return ai_seller.save_settings(data)
+
+
+@app.delete("/api/assistant/products/{sku}")
+def delete_assistant_product(sku: str):
+    return ai_seller.delete_product(sku)
+
+
+@app.get("/api/assistant/insights")
+def assistant_insights(refresh: bool = False):
+    """Toplu mağaza analizi — tüm yorumlar birlikte değerlendirilir."""
+    return ai_seller.generate_store_insights(force=refresh)
+
+
+@app.post("/api/assistant/ask")
+def assistant_ask(req: AskRequest):
+    """Mağaza verileri hakkında soru-cevap."""
+    q = req.question.strip()
+    if not q:
+        raise HTTPException(400, "Soru boş olamaz.")
+    return ai_seller.answer_store_question(q, req.sku)
+
+
+@app.post("/api/assistant/suggest-reply")
+def assistant_suggest_reply(req: ReplyRequest):
+    """Tek müşteri yorumuna mağaza cevabı önerir."""
+    if not req.comment_text.strip():
+        raise HTTPException(400, "Yorum metni boş olamaz.")
+    return ai_seller.suggest_reply_for_review(req.model_dump())
+
+
+@app.post("/api/assistant/scrape-reviews")
+async def assistant_scrape_reviews(req: ScrapeRequest):
+    """Ürün linkinden yorumları çeker (Trendyol / Hepsiburada / N11 / Amazon.com.tr)."""
+    from .review_scraper import scrape_reviews_from_url
+
+    try:
+        ai_seller.scrape_url_matches_store(req.url.strip(), ai_seller.load_settings().get("platform", "trendyol"))
+        rows, meta = await scrape_reviews_from_url(req.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Yorumlar çekilemedi: {str(e)[:200]}")
+    result = ai_seller.add_scraped_reviews([
+        {**r, "review_date": str(r.get("review_date") or "")} for r in rows
+    ], meta={k: v for k, v in meta.items() if k != "html"})
+    return {**result, "meta": {k: v for k, v in meta.items() if k != "html"}}
+
+
+@app.get("/api/assistant/presets")
+def assistant_presets(product_name: Optional[str] = None):
+    """Danışman hazır soruları — gruplu (otomasyonv3 consultantPresets)."""
+    return ai_seller.get_consultant_presets(product_name)
+
+
+# --- İade analizi ---
+
+@app.post("/api/assistant/import-returns")
+async def import_returns(file: UploadFile):
+    """İade CSV'si: product_name,sku,return_reason,return_date,quantity"""
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(400, "Lütfen .csv uzantılı bir dosya yükleyin.")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(400, "CSV 5 MB'dan küçük olmalı.")
+    try:
+        return ai_seller.import_returns_csv(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/assistant/returns")
+def delete_returns():
+    ai_seller.clear_returns()
+    return {"ok": True}
+
+
+@app.get("/api/assistant/returns-insights")
+def returns_insights():
+    """İade kayıtlarının AI analizi."""
+    return ai_seller.generate_returns_insights()
+
+
+# --- Kargo takip ---
+
+@app.post("/api/assistant/import-shipments")
+async def import_shipments(file: UploadFile):
+    """Kargo CSV'si: order_id,product_name,sku,carrier,tracking_number,status,shipped_date,delivered_date"""
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(400, "Lütfen .csv uzantılı bir dosya yükleyin.")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(400, "CSV 5 MB'dan küçük olmalı.")
+    try:
+        return ai_seller.import_shipments_csv(raw)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/assistant/shipments")
+def delete_shipments():
+    ai_seller.clear_shipments()
+    return {"ok": True}
+
+
+@app.get("/api/assistant/shipments")
+def list_shipments(status: Optional[str] = None):
+    """Kargo listesi + firma bazlı özet. status: shipped|in_transit|delivered|active"""
+    return ai_seller.compute_shipments_stats(status)
 
 
 def _host_image(filename: str) -> str:

@@ -1,0 +1,62 @@
+[
+ {
+  "order_id": "TY-1000",
+  "product_name": "Kadın Oversize Sweatshirt",
+  "sku": "SW-001",
+  "carrier": "Trendyol Express",
+  "tracking_number": "TRK468074",
+  "status": "shipped",
+  "shipped_date": "2026-06-07",
+  "delivered_date": ""
+ },
+ {
+  "order_id": "TY-1001",
+  "product_name": "Bluetooth Kulaklık",
+  "sku": "KL-88",
+  "carrier": "Yurtiçi Kargo",
+  "tracking_number": "TRK693830",
+  "status": "in_transit",
+  "shipped_date": "2026-06-11",
+  "delivered_date": ""
+ },
+ {
+  "order_id": "TY-1002",
+  "product_name": "Erkek Koşu Ayakkabısı",
+  "sku": "AY-204",
+  "carrier": "Sürat Kargo",
+  "tracking_number": "TRK876962",
+  "status": "in_transit",
+  "shipped_date": "2026-06-14",
+  "delivered_date": ""
+ },
+ {
+  "order_id": "TY-1003",
+  "product_name": "Bluetooth Kulaklık",
+  "sku": "KL-88",
+  "carrier": "Yurtiçi Kargo",
+  "tracking_number": "TRK494468",
+  "status": "delivered",
+  "shipped_date": "2026-06-14",
+  "delivered_date": "2026-06-19"
+ },
+ {
+  "order_id": "TY-1004",
+  "product_name": "Çocuk Polar Mont",
+  "sku": "MT-12",
+  "carrier": "Aras Kargo",
+  "tracking_number": "TRK265055",
+  "status": "shipped",
+  "shipped_date": "2026-06-02",
+  "delivered_date": ""
+ },
+ {
+  "order_id": "TY-1005",
+  "product_name": "Silikon Mutfak Seti",
+  "sku": "MF-55",
+  "carrier": "Trendyol Express",
+  "tracking_number": "TRK914571",
+  "status": "delivered",
+  "shipped_date": "2026-06-07",
+  "delivered_date": "2026-06-09"
+ }
+]

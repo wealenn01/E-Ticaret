@@ -1,0 +1,234 @@
+/* Globe Express — Giulio Cuscito "Timed Cards" (birebir) */
+html, body { height: 100%; }
+body.ge-home-active {
+  margin: 0; overflow-x: hidden;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+body.in-module { background: #fbfaff; overflow-y: auto; }
+
+#appHome {
+  position: fixed; inset: 0; z-index: 10;
+  color: #fff; overflow: hidden;
+}
+
+.ge-top-progress {
+  position: fixed; top: 0; left: 0; width: 100%; z-index: 200;
+  background: rgba(255,255,255,.66); height: 4px; overflow: hidden;
+}
+.ge-top-progress-bar {
+  height: 100%; width: 100%; background: #f7ba53;
+  transform: translateX(-100%);
+}
+.ge-top-progress-bar.running {
+  animation: geTopSweep 5s linear forwards;
+}
+@keyframes geTopSweep {
+  from { transform: translateX(-100%); }
+  90% { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+.ge-bg {
+  display: flex; flex-direction: column; min-height: 100%; min-width: 265px;
+  position: relative; background-size: cover; background-repeat: no-repeat;
+  background-position: center;
+  transition: background-image 400ms 100ms;
+}
+.ge-bg::after {
+  content: ""; position: absolute; inset: 0;
+  background: rgba(0,0,0,.1); pointer-events: none;
+}
+
+.ge-header {
+  position: relative; z-index: 110;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 60px; padding: 2em 1.5em 0;
+}
+.ge-logo-wrap { display: flex; align-items: center; gap: 10px; }
+.ge-logo-icon {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, #8b7cf6, #f7ba53);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 14px; user-select: none;
+}
+.ge-logo {
+  font-size: 1.5rem; font-weight: 400; margin: 0;
+  user-select: none; letter-spacing: .02em;
+}
+.ge-header-right { display: flex; align-items: center; }
+
+.ge-nav { margin-right: 50px; }
+.ge-nav ul {
+  list-style: none; margin: 0; padding: 5px 0 0;
+  display: flex; align-items: center;
+}
+.ge-nav li {
+  margin-right: 30px; padding: 5px 0; cursor: pointer;
+  transition: color .2s; position: relative;
+}
+.ge-nav li:last-child { margin-right: 0; }
+.ge-nav li:hover { color: #ffffffde; }
+.ge-nav li::after {
+  content: ""; display: block; height: 2px; width: 0;
+  background: #f7ba53; transition: width .3s;
+}
+.ge-nav li:hover::after { width: 100%; }
+.ge-nav a {
+  color: inherit; text-decoration: none; font-size: .85rem;
+  letter-spacing: .08em;
+}
+
+.ge-header-box { display: flex; align-items: center; gap: 15px; }
+.ge-header-btn {
+  background: none; border: none; color: inherit; cursor: pointer;
+  padding: 4px; transition: color .15s; display: flex; align-items: center;
+}
+.ge-header-btn:hover { color: #ffffffc2; }
+.ge-header-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+.ge-platform-label {
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: rgba(255,255,255,.55);
+}
+.ge-platform-label select {
+  background: transparent; border: 0; color: rgba(255,255,255,.85);
+  font-size: 12px; cursor: pointer; margin-left: 4px;
+}
+.ge-platform-label select option { color: #222; }
+
+.ge-main {
+  position: relative; z-index: 1; flex: 1;
+  display: flex; align-items: center;
+}
+.ge-content {
+  display: flex; width: 100%; padding: 0 65px;
+}
+@media (max-width: 64em) {
+  .ge-content { flex-direction: column; align-items: center; padding: 0 24px; }
+  .ge-nav { display: none; }
+  .ge-logo { display: none; }
+  .ge-cards-wrap { display: none; }
+}
+
+.ge-hero {
+  color: #fff; flex-shrink: 0; width: 40%;
+  margin-bottom: 2em; padding-top: 65px; position: relative;
+}
+@media (max-width: 64em) {
+  .ge-hero { width: auto; padding-top: 0; text-align: center; }
+}
+
+.ge-hero-title {
+  font-size: 2rem; font-weight: 400; margin: 0;
+  position: absolute; top: 25px;
+}
+@media (max-width: 100em) { .ge-hero-title { font-size: calc(1.5vw + .4em); } }
+@media (max-width: 64em) { .ge-hero-title { position: static; line-height: 2em; } }
+
+.ge-hero-body {
+  display: flex; flex-direction: column; height: 350px; position: relative;
+  padding-top: 55px;
+}
+@media (max-width: 64em) { .ge-hero-body { height: 280px; } }
+
+.ge-hero-body.anim-in { animation: geSlideUp .6s ease forwards; }
+@keyframes geSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.ge-hero-subtitle {
+  font-size: 4rem; text-transform: uppercase; margin: 0 0 16px;
+  font-weight: 400; line-height: 1.05;
+}
+@media (max-width: 100em) { .ge-hero-subtitle { font-size: calc(1.5vw + 2em); } }
+
+.ge-hero-text {
+  font-size: 1rem; line-height: 1.6rem; margin: 0 0 auto;
+  max-width: 480px;
+}
+@media (max-width: 64em) { .ge-hero-text { margin-bottom: 2em; } }
+
+.ge-hero-actions {
+  display: flex; align-items: flex-end; flex-basis: 100%;
+}
+@media (max-width: 64em) { .ge-hero-actions { justify-content: center; } }
+
+.ge-btn-bookmark {
+  background: #f7ba53; border: none; border-radius: 50%;
+  margin-right: 20px; padding: .7rem; color: #fff; cursor: pointer;
+  transition: background .2s; display: flex; align-items: center; justify-content: center;
+  width: auto; box-shadow: none;
+}
+.ge-btn-bookmark:hover { background: #f7ba53d6; }
+.ge-btn-bookmark svg { width: 20px; height: 20px; fill: #fff; }
+@media (max-width: 64em) { .ge-btn-bookmark { display: none; } }
+
+.ge-btn-discover {
+  background: none; border: 1px solid #fff; border-radius: 20px;
+  color: inherit; padding: .7rem 1.2rem; cursor: pointer;
+  font-size: .85rem; letter-spacing: .06em;
+  transition: background .2s; width: auto; margin: 0; box-shadow: none;
+}
+.ge-btn-discover:hover { background: #dcdcdc5e; }
+
+.ge-slider-area { flex-shrink: 0; min-width: 60%; overflow: hidden; }
+
+.ge-cards-wrap { overflow: hidden; }
+.ge-cards-track {
+  display: flex; padding: 65px 40px;
+  transition: transform 300ms 10ms;
+}
+.ge-card {
+  flex-shrink: 0; width: 230px; height: 350px;
+  margin-right: 40px; border-radius: 20px; padding: 1.5rem;
+  background-size: cover; background-repeat: no-repeat;
+  background-position: center;
+  box-shadow: 15px 15px 50px #000;
+  color: #f5f5f5; display: flex; flex-direction: column;
+  justify-content: flex-end; cursor: pointer; border: 0;
+  text-align: left; font-family: inherit;
+  transition: box-shadow 200ms 15ms;
+  white-space: normal;
+}
+.ge-card.opened { box-shadow: none; }
+.ge-card-title { font-size: .8rem; line-height: 2.5em; margin: 0; font-weight: 400; }
+.ge-card-subtitle {
+  text-transform: uppercase; width: 85%; margin: 0;
+  font-size: 1rem; font-weight: 400; line-height: 1.2;
+}
+
+.ge-controls {
+  display: flex; align-items: center; padding: 0 40px;
+}
+.ge-ctrl-btn {
+  background: none; border: 1px solid #fff; border-radius: 50%;
+  color: #fff; margin-right: 25px; padding: 20px;
+  cursor: pointer; transition: background .2s; outline: none;
+  font-size: 18px; line-height: 1; width: auto; box-shadow: none;
+}
+.ge-ctrl-btn:hover { background: #dcdcdc5e; }
+
+.ge-progress {
+  background: #ffffffa8; flex-shrink: 0;
+  max-width: 500px; width: 30vw;
+}
+.ge-progress-bar {
+  background: #f7ba53; height: 2px;
+  transition: width 200ms ease 20ms; width: 0%;
+}
+
+.ge-counter {
+  color: #f5f5f5; font-size: 4rem; margin: 0 0 0 25px;
+  font-weight: 400; line-height: 1;
+}
+@media (max-width: 90em) { .ge-counter { font-size: calc(3.3vw + 1em); } }
+
+.ge-footer {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.5em 65px 2em; font-size: .85rem; color: rgba(255,255,255,.7);
+}
+.ge-footer p { margin: 0; }

@@ -1,0 +1,7 @@
+order_id,product_name,sku,carrier,tracking_number,status,shipped_date,delivered_date
+TY-1000,Kadın Oversize Sweatshirt,SW-001,Trendyol Express,TRK468074,shipped,2026-06-07,
+TY-1001,Bluetooth Kulaklık,KL-88,Yurtiçi Kargo,TRK693830,in_transit,2026-06-11,
+TY-1002,Erkek Koşu Ayakkabısı,AY-204,Sürat Kargo,TRK876962,in_transit,2026-06-14,
+TY-1003,Bluetooth Kulaklık,KL-88,Yurtiçi Kargo,TRK494468,delivered,2026-06-14,2026-06-19
+TY-1004,Çocuk Polar Mont,MT-12,Aras Kargo,TRK265055,shipped,2026-06-02,
+TY-1005,Silikon Mutfak Seti,MF-55,Trendyol Express,TRK914571,delivered,2026-06-07,2026-06-09
