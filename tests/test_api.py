@@ -25,6 +25,15 @@ os.environ.setdefault("TRENDYOL_API_KEY", "")
 os.environ.setdefault("TRENDYOL_API_SECRET", "")
 os.environ.setdefault("GEMINI_API_KEY", "")
 
+# Testlerde gerçek e-posta gönderilmez; kod veritabanına yazılır.
+import app.mail as _mail_mod
+
+def _test_mail_send(to: str, code: str, name: str = "") -> dict:
+    return {"ok": True, "mode": "test"}
+
+_mail_mod.send_verification_code_email = _test_mail_send
+_mail_mod.is_configured = lambda: True
+
 
 # Geçici data dizini kullan (gerçek DB'ye dokunmama)
 import app.db as _db_mod
@@ -52,7 +61,13 @@ def _register(email: str, password: str = "Test1234!", name: str = "Test") -> di
         "email": email, "password": password, "full_name": name
     })
     assert r.status_code == 200, r.text
-    return r.json()
+    data = r.json()
+    user_id = data["id"]
+    row = _db_mod.query_one("SELECT code FROM email_verification_codes WHERE user_id=?", (user_id,))
+    assert row, "Doğrulama kodu oluşturulmadı"
+    vr = client.post("/api/auth/verify-email-code", json={"code": row["code"]})
+    assert vr.status_code == 200, vr.text
+    return data
 
 
 def _login(email: str, password: str = "Test1234!") -> None:

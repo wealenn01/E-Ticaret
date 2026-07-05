@@ -65,6 +65,7 @@ class DraftAttribute(BaseModel):
 class ProductDraft(BaseModel):
     """Analiz sonrası kullanıcının onayına sunulan taslak."""
     image_filename: str
+    source_image_filenames: list[str] = []
     title: str
     description_html: str
     brand: str

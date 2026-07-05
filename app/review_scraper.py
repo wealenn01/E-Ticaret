@@ -10,8 +10,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-MAX_REVIEWS = 100
-FETCH_TIMEOUT = 30.0
+MAX_REVIEWS = 400
+FETCH_TIMEOUT = 60.0
 ALLOWED_HOSTS = frozenset(
     {
         "www.hepsiburada.com",
@@ -836,7 +836,7 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
                 "contentId": content_id,
                 "page": page,
                 "order": "DESC",
-                "orderBy": "Score",
+                "orderBy": "LastModifiedDate",
                 "channelId": 1,
             },
         )
@@ -865,7 +865,7 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
 
         total_pages = int(reviews_block.get("totalPages") or 0)
         page += 1
-        if page >= total_pages or len(items) < int(reviews_block.get("size") or 30):
+        if page >= total_pages:
             break
 
     if not collected:

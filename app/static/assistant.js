@@ -82,7 +82,7 @@
           </header>
           <div class="insight-sections-stack">
             <section class="insight-section insight-section-good">
-              <h4>İyi yaptığınız şeyler</h4>
+              <h4>İyi yaptıklarınız</h4>
               ${renderEvidenceItems(insight.goodPractices, "good")}
             </section>
             <section class="insight-section insight-section-do">
@@ -144,7 +144,7 @@
         <strong>${copy.title}</strong>
         <p class="hint">${copy.hint}</p>
         <input id="scrapeUrlInput" type="url" placeholder="${copy.placeholder}">
-        <button id="scrapeSubmitBtn" class="primary-sm">Çek ve analiz et</button>
+        <button id="scrapeSubmitBtn" class="primary-sm">Analiz</button>
         <p id="scrapeSuccessHint" class="hint ok-line hidden"></p>
         <p id="scrapeError" class="hint err hidden"></p>
       </div>`;
@@ -179,7 +179,7 @@
         const err = AI().validateScrapeUrl(url, state.platform);
         if (err) { errEl.textContent = err; errEl.classList.remove("hidden"); return; }
         errEl.classList.add("hidden");
-        scrapeBtn.disabled = true; scrapeBtn.textContent = "Yorumlar çekiliyor…";
+        scrapeBtn.disabled = true; scrapeBtn.textContent = "Analiz ediliyor…";
         try {
           const r = await api("/api/assistant/scrape-reviews", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -187,14 +187,20 @@
           });
           const hint = $("scrapeSuccessHint");
           if (hint) {
-            hint.textContent = r.added + " yorum eklendi" + (r.meta?.product_name ? " — " + r.meta.product_name : "");
+            let msg = r.added + " yorum eklendi";
+            const total = r.meta?.total_available;
+            if (total && total > r.added) {
+              msg += " (sitede " + total.toLocaleString("tr-TR") + " yorum var — en yeniler alındı)";
+            }
+            if (r.meta?.product_name) msg += " — " + r.meta.product_name;
+            hint.textContent = msg;
             hint.classList.remove("hidden");
           }
           const inp = $("scrapeUrlInput");
           if (inp) inp.value = "";
           await refreshData();
         } catch (e) { errEl.textContent = e.message; errEl.classList.remove("hidden"); }
-        finally { scrapeBtn.disabled = false; scrapeBtn.textContent = "Çek ve analiz et"; }
+        finally { scrapeBtn.disabled = false; scrapeBtn.textContent = "Analiz"; }
       };
     }
     const drop = $("csvDropZone"), file = $("csvFileInput");

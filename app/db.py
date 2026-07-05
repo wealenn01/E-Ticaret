@@ -68,6 +68,12 @@ CREATE TABLE IF NOT EXISTS usage (
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, period, metric)
 );
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+    user_id TEXT PRIMARY KEY REFERENCES users(id),
+    code TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
 """
 
 
@@ -82,24 +88,39 @@ def _conn() -> sqlite3.Connection:
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA)
-        # Var olan veritabanlarına kolon ekle (migration)
         cols = {r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()}
         if "is_demo" not in cols:
             c.execute("ALTER TABLE users ADD COLUMN is_demo INTEGER DEFAULT 0")
+        if "email_verified_at" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN email_verified_at REAL")
+            c.execute("UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL")
+
+
+def delete_user_cascade(user_id: str) -> None:
+    """Kullanıcıya bağlı tüm kayıtları siler."""
+    with _conn() as c:
+        c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM email_verification_codes WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM usage WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM connections WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM payments WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM subscriptions WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM users WHERE id=?", (user_id,))
 
 
 def cleanup_expired_demos() -> int:
-    """Süresi dolmuş (7 günden eski) demo hesapları siler. Döngüsel job veya başlangıçta çağrılır."""
+    """Süresi dolmuş (7 günden eski) demo hesapları siler."""
+    import shutil
+
     cutoff = now() - 7 * 24 * 3600
     rows = query("SELECT id FROM users WHERE is_demo=1 AND created_at < ?", (cutoff,))
+    users_root = DATA_DIR / "users"
     for row in rows:
         uid = row["id"]
-        execute("DELETE FROM usage WHERE user_id=?", (uid,))
-        execute("DELETE FROM connections WHERE user_id=?", (uid,))
-        execute("DELETE FROM payments WHERE user_id=?", (uid,))
-        execute("DELETE FROM subscriptions WHERE user_id=?", (uid,))
-        execute("DELETE FROM sessions WHERE user_id=?", (uid,))
-        execute("DELETE FROM users WHERE id=?", (uid,))
+        delete_user_cascade(uid)
+        user_dir = users_root / uid
+        if user_dir.is_dir():
+            shutil.rmtree(user_dir, ignore_errors=True)
     return len(rows)
 
 

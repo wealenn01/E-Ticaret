@@ -11,13 +11,13 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from . import ai_agent  # noqa: E402  (load_dotenv önce çalışmalı)
 from . import ai_seller  # noqa: E402
@@ -27,6 +27,8 @@ from . import billing  # noqa: E402
 from . import db  # noqa: E402
 from . import marketplaces  # noqa: E402
 from . import ops  # noqa: E402
+from . import support  # noqa: E402
+from . import warehouse  # noqa: E402
 from .models import (  # noqa: E402
     GenerateImageRequest,
     ProductAnalysis,
@@ -36,6 +38,7 @@ from .models import (  # noqa: E402
     SceneRequest,
     SceneSpec,
 )
+from . import mail  # noqa: E402
 from .trendyol_client import TrendyolClient  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -66,6 +69,8 @@ app.include_router(billing.router)
 app.include_router(marketplaces.router)
 app.include_router(analytics.router)
 app.include_router(ops.router)
+app.include_router(support.router)
+app.include_router(warehouse.router)
 
 # Oturum gerektirmeyen API yolları
 PUBLIC_API_PREFIXES = (
@@ -84,6 +89,11 @@ async def auth_middleware(request: Request, call_next):
         user = auth.get_session_user(request)
         if not user:
             return JSONResponse(status_code=401, content={"detail": "Oturum gerekli — giriş yap veya kayıt ol."})
+        if not auth.is_email_verified(user):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "E-posta adresin doğrulanmadı — doğrulama kodunu gir.", "code": "email_not_verified"},
+            )
         request.state.user = user
         ai_seller.set_user_dir(USERS_DATA_DIR / user["id"])
     else:
@@ -201,6 +211,11 @@ def auth_page():
     return FileResponse(BASE_DIR / "static" / "auth.html")
 
 
+@app.get("/auth/verify-pending")
+def verify_pending_page():
+    return FileResponse(BASE_DIR / "static" / "verify-pending.html")
+
+
 @app.get("/account")
 def account_page():
     return FileResponse(BASE_DIR / "static" / "account.html")
@@ -218,31 +233,44 @@ def status(request: Request):
         "ai_mode": "live" if _ai_available() else "demo",
         "imgbb_configured": bool(os.getenv("IMGBB_API_KEY")),
         "logged_in": bool(user),
+        "email_verified": bool(user and auth.is_email_verified(user)),
+        "mail_configured": mail.is_configured(),
+        "mail_provider": mail.provider_name(),
     }
 
 
 @app.post("/api/analyze")
-async def analyze(file: UploadFile, request: Request):
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
-    raw = await file.read()
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(400, "Fotoğraf 8 MB'dan küçük olmalı.")
+async def analyze(request: Request, files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(400, "En az bir fotoğraf yükle.")
+    if len(files) > 6:
+        raise HTTPException(400, "En fazla 6 fotoğraf yükleyebilirsin.")
+
+    saved: list[tuple[str, str, str]] = []  # filename, b64, content_type
+    for file in files:
+        if file.content_type not in ALLOWED_TYPES:
+            raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
+        raw = await file.read()
+        if len(raw) > 8 * 1024 * 1024:
+            raise HTTPException(400, "Her fotoğraf 8 MB'dan küçük olmalı.")
+        filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[file.content_type]}"
+        (UPLOAD_DIR / filename).write_bytes(raw)
+        image_b64 = base64.standard_b64encode(raw).decode()
+        saved.append((filename, image_b64, file.content_type))
 
     billing.check_limit(_current_user(request)["id"], "ai_listing")
     trendyol = _trendyol_for(request)
-
-    filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[file.content_type]}"
-    (UPLOAD_DIR / filename).write_bytes(raw)
-    image_b64 = base64.standard_b64encode(raw).decode()
+    primary_filename = saved[0][0]
+    all_filenames = [s[0] for s in saved]
 
     if not _ai_available():
-        return _demo_analysis(filename, trendyol)
+        result = _demo_analysis(primary_filename, trendyol)
+        result["draft"]["source_image_filenames"] = all_filenames
+        return result
 
-    # 1) Fotoğraf analizi
-    analysis = ai_agent.analyze_image(image_b64, file.content_type)
-    SESSIONS[filename] = {"analysis": analysis}
-    _save_session(filename)
+    analysis = ai_agent.analyze_images([(b64, ct) for _, b64, ct in saved])
+    SESSIONS[primary_filename] = {"analysis": analysis}
+    _save_session(primary_filename)
     # 2) Fiyat araştırması (web araması)
     price = ai_agent.research_price(analysis)
     # 3) Kategori eşleştirme
@@ -253,7 +281,8 @@ async def analyze(file: UploadFile, request: Request):
     filled = ai_agent.fill_attributes(analysis, cat_attrs)
 
     draft = ProductDraft(
-        image_filename=filename,
+        image_filename=primary_filename,
+        source_image_filenames=all_filenames,
         title=analysis.title[:100],
         description_html=analysis.description_html,
         brand=analysis.brand_guess,
@@ -272,6 +301,7 @@ async def analyze(file: UploadFile, request: Request):
         "price_examples": price.competitor_examples,
         "category_reasoning": category.reasoning,
         "estimated_range": [analysis.estimated_price_min_try, analysis.estimated_price_max_try],
+        "photo_count": len(all_filenames),
     }
 
 

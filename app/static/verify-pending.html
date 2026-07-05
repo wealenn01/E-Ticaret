@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrendolAi — E-posta Doğrulama</title>
+<script>
+  (function () {
+    const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<style>
+  :root {
+    --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
+    --peach: #f9b17c; --border: #edeaf5; --bg: #ffffff; --card: #ffffff;
+    --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
+    --ok: #2d9a6a; --err: #b3305f;
+  }
+  html[data-theme="dark"] {
+    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
+    --border: #2d2749; --bg: #131020; --card: #1c1832;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: linear-gradient(160deg, var(--bg) 40%, var(--lilac-soft)); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  nav { width: 100%; padding: 14px 5vw; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; text-decoration: none; color: var(--ink); }
+  .brand .mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--lilac), var(--peach)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; }
+  .brand em { font-style: normal; color: var(--lilac); }
+  .card { width: min(460px, 92vw); background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 34px 30px; box-shadow: var(--shadow); margin: 6vh 0 40px; text-align: center; }
+  .icon { font-size: 48px; margin-bottom: 12px; }
+  h1 { font-size: 22px; margin-bottom: 8px; }
+  .sub { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+  .email { font-weight: 700; color: var(--lilac); word-break: break-all; }
+  .code-row { display: flex; gap: 10px; justify-content: center; margin: 22px 0 8px; }
+  .code-row input { width: 48px; height: 56px; text-align: center; font-size: 24px; font-weight: 800; border: 2px solid var(--border); border-radius: 12px; outline: none; background: #fff; color: var(--ink); }
+  html[data-theme="dark"] .code-row input { background: var(--lilac-soft); }
+  .code-row input:focus { border-color: var(--lilac); }
+  .btn { display: inline-block; border: 0; cursor: pointer; border-radius: 12px; padding: 12px 22px; font-size: 14px; font-weight: 700; color: #fff; margin: 6px; background: linear-gradient(135deg, var(--lilac), #a58ef8); box-shadow: 0 6px 20px rgba(139,124,246,.35); }
+  .btn:disabled { opacity: .6; cursor: wait; }
+  .btn.ghost { background: transparent; color: var(--muted); box-shadow: none; border: 1.5px solid var(--border); }
+  .msg { display: none; margin-top: 16px; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
+  .msg.ok { display: block; background: #e8f8ef; color: var(--ok); }
+  .msg.err { display: block; background: #fdeaf1; color: var(--err); }
+  .overlay { position: fixed; inset: 0; background: rgba(43,38,64,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 4vw; }
+  .overlay.on { display: flex; }
+  .modal { width: min(400px, 94vw); background: var(--card); border-radius: 18px; padding: 26px 24px; text-align: left; }
+  .modal h2 { font-size: 18px; margin-bottom: 8px; }
+  .modal p { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-bottom: 12px; }
+  .modal label { display: block; font-size: 12px; font-weight: 700; margin: 10px 0 5px; }
+  .modal input { width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; background: var(--lilac-soft); color: var(--ink); }
+  .modal .acts { display: flex; gap: 10px; margin-top: 18px; }
+  .modal .acts .btn { flex: 1; margin: 0; }
+  .btn.danger { background: transparent; color: var(--err); box-shadow: none; border: 1.5px solid #f3cede; }
+</style>
+</head>
+<body>
+<nav><a class="brand" href="/"><span class="mark">T</span> Trendol<em>Ai</em></a></nav>
+<div class="card">
+  <div class="icon">📬</div>
+  <h1>E-postanı doğrula</h1>
+  <p class="sub"><span class="email" id="userEmail">…</span> adresine gönderilen <strong>5 haneli kodu</strong> gir. Gelen kutunu ve spam klasörünü kontrol et.</p>
+  <div class="code-row">
+    <input type="text" inputmode="numeric" maxlength="1" class="cd" autocomplete="one-time-code">
+    <input type="text" inputmode="numeric" maxlength="1" class="cd">
+    <input type="text" inputmode="numeric" maxlength="1" class="cd">
+    <input type="text" inputmode="numeric" maxlength="1" class="cd">
+    <input type="text" inputmode="numeric" maxlength="1" class="cd">
+  </div>
+  <button class="btn" id="verifyBtn" type="button">Doğrula</button>
+  <button class="btn ghost" id="resendBtn" type="button">Yeni kod gönder</button>
+  <div class="msg" id="msg"></div>
+  <p class="sub" style="margin-top:22px;font-size:12px">
+    <a href="#" onclick="doLogout();return false" style="color:var(--muted)">Çıkış yap</a>
+    · <a href="#" onclick="openDeleteStep1();return false" style="color:var(--err)">Hesabı sil</a>
+  </p>
+</div>
+<div class="overlay" id="delOverlay"><div class="modal" id="delModal"></div></div>
+<script>
+const $ = id => document.getElementById(id);
+const inputs = () => [...document.querySelectorAll('.cd')];
+function getCode() { return inputs().map(i => i.value).join(''); }
+function clearCode() { inputs().forEach(i => { i.value = ''; }); inputs()[0].focus(); }
+function showMsg(t, ok) { $('msg').textContent = t; $('msg').className = 'msg ' + (ok ? 'ok' : 'err'); }
+
+inputs().forEach((inp, idx) => {
+  inp.addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(-1);
+    if (e.target.value && idx < 4) inputs()[idx + 1].focus();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !inp.value && idx > 0) inputs()[idx - 1].focus();
+  });
+  inp.addEventListener('paste', e => {
+    e.preventDefault();
+    const t = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 5);
+    t.split('').forEach((d, i) => { if (inputs()[i]) inputs()[i].value = d; });
+  });
+});
+
+async function verifyCode() {
+  const code = getCode();
+  if (code.length !== 5) { showMsg('E-postandaki 5 haneli kodu eksiksiz gir.', false); return; }
+  $('verifyBtn').disabled = true;
+  try {
+    const r = await fetch('/api/auth/verify-email-code', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Doğrulama başarısız');
+    showMsg('E-posta doğrulandı! Yönlendiriliyorsun…', true);
+    setTimeout(() => { location.href = '/panel'; }, 900);
+  } catch (e) {
+    showMsg(e.message, false);
+    clearCode();
+    $('verifyBtn').disabled = false;
+  }
+}
+$('verifyBtn').onclick = verifyCode;
+
+async function resendCode() {
+  $('msg').className = 'msg';
+  $('resendBtn').disabled = true;
+  clearCode();
+  try {
+    const r = await fetch('/api/auth/resend-verification', { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Gönderilemedi');
+    showMsg(data.message || 'Yeni kod e-postana gönderildi.', true);
+  } catch (e) {
+    showMsg(e.message, false);
+  }
+  $('resendBtn').disabled = false;
+}
+$('resendBtn').onclick = resendCode;
+
+async function doLogout() { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/auth'; }
+
+function openDeleteStep1() {
+  $('delModal').innerHTML = '<h2>Hesabı silmek istiyor musun?</h2><p>Bu işlem geri alınamaz. E-posta adresin tekrar kayıt için kullanılabilir olur.</p><div class="acts"><button class="btn danger" onclick="openDeleteStep2()">Evet, devam et</button><button class="btn ghost" onclick="closeDelete()">Vazgeç</button></div>';
+  $('delOverlay').classList.add('on');
+}
+function openDeleteStep2() {
+  $('delModal').innerHTML = '<h2>Son onay</h2><p>Parolanı gir ve <strong>HESABIMI SIL</strong> yaz.</p><label>Parola</label><input type="password" id="delPass"><label>Onay (HESABIMI SIL)</label><input type="text" id="delConfirm" placeholder="HESABIMI SIL"><div class="msg err" id="delErr" style="display:none;margin-top:12px"></div><div class="acts"><button class="btn danger" id="delBtn" onclick="doDelete()">Hesabı Kalıcı Sil</button><button class="btn ghost" onclick="closeDelete()">Vazgeç</button></div>';
+}
+function closeDelete() { $('delOverlay').classList.remove('on'); }
+async function doDelete() {
+  $('delErr').style.display = 'none'; $('delBtn').disabled = true;
+  try {
+    const r = await fetch('/api/auth/delete-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('delPass').value, confirm: $('delConfirm').value.trim() }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Silinemedi');
+    location.href = '/auth?mode=register';
+  } catch (e) { $('delErr').textContent = e.message; $('delErr').style.display = 'block'; $('delBtn').disabled = false; }
+}
+
+async function init() {
+  const r = await fetch('/api/auth/me');
+  if (!r.ok) { location.href = '/auth?mode=register'; return; }
+  const me = await r.json();
+  if (me.email_verified) { location.href = '/panel'; return; }
+  $('userEmail').textContent = me.email;
+  inputs()[0].focus();
+}
+init();
+</script>
+</body>
+</html>

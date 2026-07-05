@@ -149,6 +149,12 @@
     <h2>🧾 Ödeme Geçmişi</h2>
     <div id="invoiceWrap"><p class="muted">Henüz ödeme yok.</p></div>
   </div>
+
+  <div class="card" style="border-color:#f3cede">
+    <h2 style="color:#c0355f">⚠️ Tehlikeli Bölge</h2>
+    <p class="muted" style="margin-bottom:14px">Hesabını kalıcı olarak silersen tüm verilerin silinir. E-posta adresin tekrar kayıt için kullanılabilir olur.</p>
+    <button class="btn danger" onclick="openDeleteStep1()">Hesabı Kalıcı Olarak Sil</button>
+  </div>
 </div>
 
 <!-- Ödeme modalı -->
@@ -193,6 +199,8 @@
 
 <div id="toasts"></div>
 
+<div class="overlay" id="delOverlay"><div class="modal" id="delModal"></div></div>
+
 <script>
 const $ = id => document.getElementById(id);
 function toast(msg, ok = false) {
@@ -206,6 +214,7 @@ async function api(url, opts) {
   const r = await fetch(url, opts);
   if (r.status === 401) { location.href = '/auth?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('Oturum gerekli'); }
   const data = await r.json().catch(() => ({}));
+  if (r.status === 403 && data.code === 'email_not_verified') { location.href = '/auth/verify-pending'; throw new Error('E-posta doğrulaması gerekli'); }
   if (!r.ok) throw new Error(data.detail || 'İstek başarısız (' + r.status + ')');
   return data;
 }
@@ -221,6 +230,7 @@ let me = null, plansData = null, platforms = [], editingConnId = null, checkoutP
 
 async function load() {
   me = await api('/api/auth/me');
+  if (!me.email_verified) { location.href = '/auth/verify-pending'; return; }
   $('hello').textContent = 'Merhaba' + (me.full_name ? ', ' + me.full_name.split(' ')[0] : '') + ' 👋';
   $('helloSub').textContent = me.email + (me.company ? ' · ' + me.company : '') + ' — aboneliğini, bağlantılarını ve faturalarını buradan yönet.';
   await Promise.all([loadSub(), loadPlans(), loadConns(), loadInvoices()]);
@@ -401,6 +411,25 @@ async function loadInvoices() {
 }
 
 load().catch(e => toast(e.message));
+
+function openDeleteStep1() {
+  $('delModal').innerHTML = '<h2>Hesabı silmek istiyor musun?</h2><p class="muted">Bu işlem geri alınamaz. E-posta adresin tekrar kayıt için kullanılabilir olur.</p><div style="display:flex;gap:10px;margin-top:18px"><button class="btn danger" style="flex:1" onclick="openDeleteStep2()">Evet, devam et</button><button class="btn ghost" onclick="closeDelete()">Vazgeç</button></div>';
+  $('delOverlay').classList.add('on');
+}
+function openDeleteStep2() {
+  $('delModal').innerHTML = '<h2>Son onay</h2><p class="muted">Parolanı gir ve <strong>HESABIMI SIL</strong> yaz.</p><label>Parola</label><input type="password" id="delPass"><label>Onay (HESABIMI SIL)</label><input type="text" id="delConfirm" placeholder="HESABIMI SIL"><div class="err" id="delErr"></div><div style="display:flex;gap:10px;margin-top:18px"><button class="btn danger" style="flex:1" id="delBtn" onclick="doDeleteAccount()">Hesabı Kalıcı Sil</button><button class="btn ghost" onclick="closeDelete()">Vazgeç</button></div>';
+}
+function closeDelete() { $('delOverlay').classList.remove('on'); }
+async function doDeleteAccount() {
+  $('delErr').style.display = 'none'; $('delBtn').disabled = true;
+  try {
+    const r = await fetch('/api/auth/delete-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('delPass').value, confirm: $('delConfirm').value.trim() }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'Silinemedi');
+    toast(data.message || 'Hesap silindi.', true);
+    setTimeout(() => location.href = '/auth?mode=register', 1200);
+  } catch (e) { $('delErr').textContent = e.message; $('delErr').style.display = 'block'; $('delBtn').disabled = false; }
+}
 </script>
 </body>
 </html>

@@ -118,18 +118,30 @@ def _generate(schema: type[BaseModel], contents, system: Optional[str] = None):
 
 
 def analyze_image(image_b64: str, media_type: str) -> ProductAnalysis:
-    """Ürün fotoğrafını analiz edip yapılandırılmış ürün bilgisi çıkarır."""
+    """Tek fotoğraf — geriye dönük uyumluluk."""
+    return analyze_images([(image_b64, media_type)])
+
+
+def analyze_images(images: list[tuple[str, str]]) -> ProductAnalysis:
+    """Ürün fotoğraflarını (1–6) analiz edip yapılandırılmış ürün bilgisi çıkarır."""
+    if not images:
+        raise ValueError("En az bir fotoğraf gerekli.")
+    parts: list = []
+    for image_b64, media_type in images:
+        parts.append(types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type=media_type))
+    count = len(images)
+    parts.append(
+        f"Bu ürün için {count} fotoğraf verildi. Tüm açıları birlikte incele — etiket, kutu, "
+        "detay, renk ve ölçü ipuçlarını fotoğraflar arasında birleştir. "
+        "Ne kadar çok açı varsa o kadar eksiksiz analiz et."
+    )
     raw: _GeminiProductAnalysis = _generate(
         _GeminiProductAnalysis,
-        contents=[
-            types.Part.from_bytes(data=base64.b64decode(image_b64), mime_type=media_type),
-            "Bu ürün fotoğrafını analiz et ve Trendyol ilanı için gerekli tüm bilgileri, "
-            "ürün tipine uygun en yüksek detay seviyesinde çıkar.",
-        ],
+        contents=parts,
         system=(
             "Sen bir Trendyol e-ticaret listeleme uzmanısın. Ürün fotoğraflarını analiz edip "
             "satışa hazır, SEO uyumlu Türkçe ilan içeriği üretirsin. Kurallar:\n"
-            "1. Fotoğraftaki HER metni oku (etiket, kutu, ekran, logo, model kodu) ve bilgiye çevir.\n"
+            "1. Tüm fotoğraflardaki metinleri oku (etiket, kutu, ekran, logo, model kodu).\n"
             "2. Ürün TİPİNE göre alıcının aradığı kritik özellikleri çıkar:\n"
             "   - Elektronik/TV: marka, model, ekran boyutu (inç), panel tipi (OLED/QLED/LED), çözünürlük, bağlantılar\n"
             "   - Giyim: kumaş, kesim, yaka tipi, desen, mevsim (beden fotoğraftan bilinemez, uydurma)\n"
@@ -142,7 +154,7 @@ def analyze_image(image_b64: str, media_type: str) -> ProductAnalysis:
             "5. description_html SADECE şu etiketleri kullansın: <p>, <ul>, <li>, <strong>, <br>. "
             "Markdown, class, style KULLANMA. Yapı: kısa tanıtım paragrafı + 'Öne Çıkan Özellikler' "
             "listesi + (teknik ürünse) 'Teknik Özellikler' listesi.\n"
-            "6. observed_attributes içine fotoğraftan okunabilen TÜM teknik detayları ad/değer "
+            "6. observed_attributes içine fotoğraflardan okunabilen TÜM teknik detayları ad/değer "
             "çifti olarak koy — bunlar Trendyol kategori özelliklerini doldurmak için kullanılacak."
         ),
     )

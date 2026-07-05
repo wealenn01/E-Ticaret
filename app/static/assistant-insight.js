@@ -91,8 +91,18 @@
 
   function positiveSamples(product) {
     const pool = (product.positive_samples || []).filter(s => s.text?.trim());
-    const fiveStar = pool.filter(s => s.rating >= 5);
-    return (fiveStar.length ? fiveStar : pool).slice(0, 5).map(s => ({ text: s.text, rating: s.rating }));
+    const scored = pool.map(s => {
+      const low = s.text.toLowerCase();
+      let score = s.rating || 4;
+      if (/tavsiye|kesinlikle|mükemmel|mukemmel|harika|çok memnun|cok memnun|bayıldım|bayildim/.test(low)) score += 4;
+      if (/henüz|fark hissetmedi|fark yok|bilmiyorum|yeni kullan|yeni başlad/.test(low)) score -= 3;
+      if (s.text.length > 40) score += 1;
+      return { ...s, _score: score };
+    });
+    scored.sort((a, b) => b._score - a._score);
+    const fiveStar = scored.filter(s => s.rating >= 5);
+    const ordered = fiveStar.length ? fiveStar : scored;
+    return ordered.slice(0, 5).map(s => ({ text: s.text, rating: s.rating }));
   }
 
   function countTopic(product, topic) {
@@ -143,16 +153,67 @@
     return t ? t[0].toUpperCase() : "?";
   }
 
-  function friendlyGoodAdvice(sample, product) {
+  function classifyPositiveTone(text) {
+    const low = (text || "").toLowerCase();
+    if (/inşallah|insallah|umarım|umarim|memnun kalır|memnun kalir/.test(low) && !/kesinlikle|mükemmel|mukemmel|harika|bayıldım|bayildim/.test(low)) return "hope";
+    if (/tavsiye|öneririm|oneririm|kesinlikle|tekrar al|herkese/.test(low)) return "recommend";
+    if (/henüz|henuz|fark hissetmedi|fark yok|bilmiyorum|eminsiz|şüphe|suphe|yeni kullan|yeni başlad|bekliyorum|erken/.test(low)) return "early";
+    if (/kargo|hızlı|hizli|teslimat|çabuk|cabuk|zamanında|zamaninda/.test(low)) return "shipping";
+    if (/kalite|kumaş|kumas|sağlam|saglam|dayanıklı|dayanikli|doku/.test(low)) return "quality";
+    if (/paket|ambalaj|özenli|ozenli/.test(low)) return "packaging";
+    if (/fiyat|uygun|ucuz|performans/.test(low)) return "price";
+    if (/mükemmel|mukemmel|harika|süper|super|bayıldım|bayildim|çok güzel|cok guzel/.test(low)) return "delight";
+    if (/etki|işe yar|ise yar|fark etti|memnun|beğen|begen/.test(low)) return "effect";
+    return "general";
+  }
+
+  function friendlyGoodAdvice(sample, index) {
     const quote = truncateQuote(sample.text, 70);
-    const themes = [];
-    const low = sample.text.toLowerCase();
-    if (/kargo|hızlı|hizli|teslimat/.test(low)) themes.push("hızlı teslimat");
-    if (/kalite|kumaş|kumas|sağlam|saglam/.test(low)) themes.push("ürün kalitesi");
-    if (/paket|ambalaj/.test(low)) themes.push("özenli paketleme");
-    if (/fiyat|uygun/.test(low)) themes.push("fiyat/performans");
-    const theme = themes[0] || "genel memnuniyet";
-    return `Bir müşteri "${quote}" demiş — ${theme} konusunda iyi bir izlenim bırakmışsın. Bu tarz yorumlar genelde aynı standardın devam ettiğini gösterir; sayfanda da bunu yansıtırsan yeni alıcılar doğru beklentiyle gelir.`;
+    const tone = classifyPositiveTone(sample.text);
+    const variants = {
+      hope: [
+        `Müşteri "${quote}" demiş — bir başkasının tavsiyesiyle sana güvenip gelmiş. İtibar tarafında işi gerçekten iyi yapıyorsun; insanlar seni anlatmaya değer buluyor. Bu güveni korumak için ilk sipariş deneyimini sıcak tut, böyle devam.`,
+        `"${quote}" — henüz sonucu bilmese de seni seçmiş; bu, mağazanın güven verdiğinin işareti. İyi yaptığın şey: tavsiye zincirini bozmadan karşılamak. Küçük trick: kısa bir “iyi günlerde kullanın” notu bu umutlu müşteriyi sadık alıcıya çevirir.`,
+      ],
+      recommend: [
+        `Müşteri "${quote}" demiş — açıkça seni öneriyor. Tavsiye alan mağazalar en sağlam büyür; bu yönde gerçekten iyi iş çıkarıyorsun, standardı düşürme.`,
+        `"${quote}" — güçlü bir öneri. Müşteri seni çevresine anlatmaya değer bulmuş; bu en değerli pazarlama. Böyle giderse yeni alıcılar daha az tereddüt eder. Trick: memnun müşteriye samimi bir teşekkür bazen ikinci tavsiyeyi tetikler.`,
+        `"${quote}" — net tavsiye geliyor. Güven tarafında tutturmuşsun; aynı kalite ve hizmetle devam ettiğinde bu cümleler çoğalır.`,
+      ],
+      delight: [
+        `"${quote}" — coşkulu bir memnuniyet. Müşteri kısa bile yazsa hissi net: ürün beklentiyi karşılamış. Bu yönde iyi gidiyorsun, enerjini koru.`,
+        `Müşteri "${quote}" demiş — tek cümlede bile sevgi var. Deneyim tarafında işi güzel yapıyorsun; bu tarz yorumlar birikince mağaza algısı kendiliğinden güçlenir.`,
+      ],
+      early: [
+        `"${quote}" — henüz sonuç bekliyor ama sana güvenmiş. İlk izlenim tarafında doğru yapıyorsun; ürünü denemeye değer bulmuşlar. Sabırlı müşteriyi kaybetmemek için kullanım sürecini nazikçe hatırlatmak yeterli olur.`,
+        `Bu yorum ("${quote}") olumsuz değil — yeni kullanıcı. Güven vermeyi başarmışsın; şimdi beklenti yönetimini de iyi yaparsan bu kişi memnun kalıcıya döner.`,
+      ],
+      shipping: [
+        `Kargo tarafında gerçekten iyi iş çıkarıyorsun — "${quote}" bunun kanıtı. Hızlı teslimat senin güçlü yanın; aynı tempoyla devam. Trick: haftalık ortalama çıkış süresini takip etmek bu övgüyü sürdürür.`,
+        `"${quote}" — teslimat memnuniyeti net. Operasyonu bu hızda tuttuğun sürece rakiplerin önündesin; müşteri bunu fark ediyor ve yazıyor.`,
+      ],
+      quality: [
+        `Kalite konusunda müşterinin gözünde tutturmuşsun: "${quote}". Bu işi bu yönde iyi yapıyorsun — malzeme ve sunum standardını koru.`,
+        `"${quote}" — kalite algısı güçlü. Müşteri eline aldığında beklediğini bulmuş; bu en zor kısım ve sen başarıyorsun. Trick: övülen kelimeyi (sağlam, doku vb.) görsellerin altına yazmak aynı algıyı pekiştirir.`,
+      ],
+      packaging: [
+        `"${quote}" — paketlemeye özen göstermişsin ve müşteri fark etmiş. Küçük detay büyük fark yaratır; bu standardı bozma, hasarlı kutu yorumları azalır.`,
+      ],
+      price: [
+        `"${quote}" — fiyat/performans dengesini yakalamışsın. Müşteri “değdi” diyor; bu algıyı korudukça tekrar alış gelir. Kampanya döneminde bile aynı değer hissini vermeye devam et.`,
+      ],
+      effect: [
+        `"${quote}" — ürün etkisini hissetmiş. Sonuç tarafında işe yarıyorsun; bu en güçlü övgü. Benzer müşteri profiline ulaştıkça aynı cümleler çoğalır.`,
+        `Müşteri "${quote}" demiş — fayda görmüş. Vaat ile gerçek uyumlu; bu yönde iyi gidiyorsun. Trick: kullanım süresini kısaca anlatan bir not sadık müşteri getirir.`,
+      ],
+      general: [
+        `"${quote}" — olumlu ve samimi bir geri bildirim. Müşteri deneyiminden memnun kalmış; genel hatlarıyla işi iyi yapıyorsun, bu tempoyu koru.`,
+        `Müşteri "${quote}" demiş — güven veren bir sinyal. Mağaza algın olumlu; küçük detaylara da özen gösterdiğinde bu yorumlar kendiliğinden artar.`,
+        `"${quote}" — içten bir memnuniyet. Doğru müşteriye ulaştığında işin karşılığını alıyorsun; aynı özeni sürdür.`,
+      ],
+    };
+    const pool = variants[tone] || variants.general;
+    return pool[index % pool.length];
   }
 
   function specificRecommendation(product, topCode, topLabel, sampleQuote, sellerModel) {
@@ -333,7 +394,7 @@
       return makeEvidence(
         index + 1,
         `Müşteriler: "${shortTitle}"`,
-        friendlyGoodAdvice(sample, product),
+        friendlyGoodAdvice(sample, index),
         product, null, product.positive_reviews, [sample]
       );
     });
@@ -397,7 +458,7 @@
       },
       recommendations: applySeller(recommendations.slice(0, 3)),
       avoidActions: avoidActions.slice(0, 3),
-      goodPractices: applySeller(buildGoodPractices(product).slice(0, 3)),
+      goodPractices: buildGoodPractices(product).slice(0, 3),
     };
   }
 
