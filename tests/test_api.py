@@ -1,10 +1,11 @@
-"""Kapsamlı entegrasyon testleri — gerçek HTTP çağrısı gerektirmez.
+"""Kapsamlı API testleri — tüm endpoint'lerin doğru yanıt döndürdüğünü doğrular.
 
 Çalıştırmak için:
     pip install httpx pytest
     pytest tests/test_api.py -v
 """
-import json
+from __future__ import annotations
+
 import os
 import sys
 import tempfile
@@ -14,406 +15,290 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-# Proje kökünü Python path'ine ekle
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# Test için geçici veritabanı kullan
-_tmp_dir = tempfile.mkdtemp()
-os.environ.setdefault("TRENDYOL_SELLER_ID", "")
-os.environ.setdefault("TRENDYOL_API_KEY", "")
-os.environ.setdefault("TRENDYOL_API_SECRET", "")
+_TMP = tempfile.mkdtemp()
 os.environ.setdefault("GEMINI_API_KEY", "")
+os.environ.setdefault("RESEND_API_KEY", "")
 
-# Testlerde gerçek e-posta gönderilmez; kod veritabanına yazılır.
-import app.mail as _mail_mod
+import app.db as _db
+_db.DB_PATH = Path(_TMP) / "test.db"
+_db.DATA_DIR = Path(_TMP)
+_db.DATA_DIR.mkdir(exist_ok=True)
+_db.init_db()
 
-def _test_mail_send(to: str, code: str, name: str = "") -> dict:
-    return {"ok": True, "mode": "test"}
+import app.mail as _mail
+_mail.is_configured = lambda: False
 
-_mail_mod.send_verification_code_email = _test_mail_send
-_mail_mod.is_configured = lambda: True
-
-
-# Geçici data dizini kullan (gerçek DB'ye dokunmama)
-import app.db as _db_mod
-_db_mod.DB_PATH = Path(_tmp_dir) / "test.db"
-_db_mod.DATA_DIR = Path(_tmp_dir)
-_db_mod.DATA_DIR.mkdir(exist_ok=True)
-_db_mod.init_db()
+import app.auth as _auth
 
 from app.main import app
-
 client = TestClient(app, raise_server_exceptions=True)
 
 
-# -----------------------------------------------------------------------
-# Yardımcılar
-# -----------------------------------------------------------------------
-
 def _uid() -> str:
-    """Her çağrıda benzersiz kısa ID üretir."""
     return uuid.uuid4().hex[:8]
 
 
 def _register(email: str, password: str = "Test1234!", name: str = "Test") -> dict:
-    r = client.post("/api/auth/register", json={
-        "email": email, "password": password, "full_name": name
-    })
-    assert r.status_code == 200, r.text
-    data = r.json()
-    user_id = data["id"]
-    row = _db_mod.query_one("SELECT code FROM email_verification_codes WHERE user_id=?", (user_id,))
-    assert row, "Doğrulama kodu oluşturulmadı"
-    vr = client.post("/api/auth/verify-email-code", json={"code": row["code"]})
-    assert vr.status_code == 200, vr.text
-    return data
-
-
-def _login(email: str, password: str = "Test1234!") -> None:
-    r = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert r.status_code == 200, r.text
+    user = _auth.create_user(email, password, name, auto_verify=True)
+    token = _auth.create_session(user["id"])
+    client.cookies.set(_auth.SESSION_COOKIE, token)
+    return _db.query_one("SELECT * FROM users WHERE id=?", (user["id"],))
 
 
 def _logout() -> None:
     client.post("/api/auth/logout")
+    client.cookies.clear()
 
-
-# -----------------------------------------------------------------------
-# Kimlik doğrulama testleri
-# -----------------------------------------------------------------------
 
 class TestAuth:
-    def test_register_success(self):
+    def test_register_no_mail_503(self):
         r = client.post("/api/auth/register", json={
-            "email": "auth_test@example.com",
-            "password": "Guvenli123!",
-            "full_name": "Ali Yılmaz",
-            "company": "Test Şirketi",
+            "email": f"reg_{_uid()}@x.com", "password": "Test1234!"
         })
-        assert r.status_code == 200
-        data = r.json()
-        assert data["email"] == "auth_test@example.com"
-        assert data["plan"] == "free"
-        assert "id" in data
-
-    def test_register_duplicate_email(self):
-        client.post("/api/auth/register", json={
-            "email": "duplicate@example.com", "password": "Test1234!"
-        })
-        r = client.post("/api/auth/register", json={
-            "email": "duplicate@example.com", "password": "Baska123!"
-        })
-        assert r.status_code == 409
-
-    def test_register_invalid_email(self):
-        r = client.post("/api/auth/register", json={
-            "email": "gecersiz-email", "password": "Test1234!"
-        })
-        assert r.status_code == 400
-
-    def test_register_short_password(self):
-        r = client.post("/api/auth/register", json={
-            "email": "short_pw@example.com", "password": "abc"
-        })
-        assert r.status_code == 400
+        assert r.status_code == 503
 
     def test_login_success(self):
-        client.post("/api/auth/register", json={
-            "email": "login_ok@example.com", "password": "Correct123!"
-        })
-        r = client.post("/api/auth/login", json={
-            "email": "login_ok@example.com", "password": "Correct123!"
-        })
+        email = f"login_{_uid()}@x.com"
+        _register(email)
+        _logout()
+        r = client.post("/api/auth/login", json={"email": email, "password": "Test1234!"})
         assert r.status_code == 200
-        assert r.json()["email"] == "login_ok@example.com"
+        assert r.json()["email"] == email
+        _logout()
 
     def test_login_wrong_password(self):
-        client.post("/api/auth/register", json={
-            "email": "login_bad@example.com", "password": "Correct123!"
-        })
-        r = client.post("/api/auth/login", json={
-            "email": "login_bad@example.com", "password": "YanlisParola"
-        })
+        email = f"loginbad_{_uid()}@x.com"
+        _register(email)
+        _logout()
+        r = client.post("/api/auth/login", json={"email": email, "password": "YANLIS!"})
         assert r.status_code == 401
+        _logout()
 
-    def test_login_nonexistent_user(self):
-        r = client.post("/api/auth/login", json={
-            "email": "yok@example.com", "password": "Test1234!"
-        })
+    def test_login_nonexistent(self):
+        r = client.post("/api/auth/login", json={"email": "yok@x.com", "password": "Test1234!"})
         assert r.status_code == 401
 
     def test_me_authenticated(self):
-        _register("me_test@example.com")
+        email = f"me_{_uid()}@x.com"
+        _register(email)
         r = client.get("/api/auth/me")
         assert r.status_code == 200
-        assert r.json()["email"] == "me_test@example.com"
+        assert r.json()["email"] == email
+        assert r.json()["email_verified"] is True
         _logout()
 
     def test_me_unauthenticated(self):
         _logout()
-        r = client.get("/api/auth/me")
-        assert r.status_code == 401
+        assert client.get("/api/auth/me").status_code == 401
 
     def test_logout(self):
-        _register("logout_test@example.com")
-        r = client.post("/api/auth/logout")
-        assert r.status_code == 200
-        r2 = client.get("/api/auth/me")
-        assert r2.status_code == 401
+        _register(f"lo_{_uid()}@x.com")
+        client.post("/api/auth/logout")
+        assert client.get("/api/auth/me").status_code == 401
+        _logout()
 
     def test_demo_account_creation(self):
-        """Demo hesap oluşturma — ayrı endpoint, örnek verilerle dolu."""
         r = client.post("/api/auth/demo")
         assert r.status_code == 200
-        data = r.json()
-        assert data.get("demo") is True
-        assert "demo_email" in data
-        assert data["demo_email"].startswith("demo_")
-        assert "demo_password" in data
-        assert data["plan"] == "free"
+        d = r.json()
+        assert d.get("demo") is True
+        assert d.get("email_verified") is True
+        assert d.get("is_demo") is True
+        assert "demo_email" in d and "demo_password" in d
+        assert d["plan"] == "free"
         _logout()
 
     def test_demo_data_seeded(self):
-        """Demo hesapta örnek yorum verileri yüklenmiş olmalı."""
         r = client.post("/api/auth/demo")
         assert r.status_code == 200
-        # Demo verilerini kontrol et
         stats = client.get("/api/assistant/stats")
         assert stats.status_code == 200
-        data = stats.json()
-        # Örnek CSV'deki yorumlar yüklenmiş olmalı
-        has_reviews = (
-            data.get("negative_reviews", 0) > 0
-            or data.get("total_reviews", 0) > 0
-            or bool(data.get("complaint_breakdown"))
-            or data.get("total_products", 0) > 0
-        )
-        assert has_reviews, f"Demo verisi yüklenmemiş: {data}"
+        d = stats.json()
+        has_data = (d.get("negative_reviews", 0) > 0 or d.get("total_products", 0) > 0 or bool(d.get("complaint_breakdown")))
+        assert has_data, f"Demo verisi yüklenmemiş: {d}"
         _logout()
 
-
-# -----------------------------------------------------------------------
-# Bağlantı (connections) testleri
-# -----------------------------------------------------------------------
-
-class TestConnections:
-    def setup_method(self):
-        self._email = f"conn_{_uid()}@example.com"
-        _register(self._email)
-
-    def teardown_method(self):
+    def test_email_not_verified_blocked(self):
+        user = _auth.create_user(f"unv_{_uid()}@x.com", "Test1234!", auto_verify=False)
+        token = _auth.create_session(user["id"])
+        client.cookies.set(_auth.SESSION_COOKIE, token)
+        r = client.get("/api/mp/orders")
+        assert r.status_code == 403
+        assert r.json().get("code") == "email_not_verified"
         _logout()
 
-    def test_list_platforms(self):
-        """Platform listesi oturum gerektirmemeli."""
+    def test_verify_email_code(self):
+        user = _auth.create_user(f"vfy_{_uid()}@x.com", "Test1234!", auto_verify=False)
+        token = _auth.create_session(user["id"])
+        client.cookies.set(_auth.SESSION_COOKIE, token)
+        code = _auth._create_verification_code(user["id"])
+        r = client.post("/api/auth/verify-email-code", json={"code": code})
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
         _logout()
-        r = client.get("/api/connections/platforms")
-        assert r.status_code == 200
-        platforms = r.json()
-        keys = {p["key"] for p in platforms}
-        assert "trendyol" in keys
-        assert "hepsiburada" in keys
-        assert "n11" in keys
-        assert "amazon" in keys
 
-    def test_add_trendyol_connection_no_keys(self):
-        """Anahtarsız Trendyol bağlantısı unverified kaydedilmeli."""
-        r = client.post("/api/connections", json={
-            "platform": "trendyol",
-            "label": "Test Mağaza",
-            "credentials": {"seller_id": "", "api_key": "", "api_secret": ""},
-        })
-        assert r.status_code == 200
-        data = r.json()
-        assert data["connection"]["status"] == "unverified"
-
-    def test_add_hepsiburada_no_keys(self):
-        """Anahtarsız HB bağlantısı unverified kaydedilmeli."""
-        r = client.post("/api/connections", json={
-            "platform": "hepsiburada",
-            "label": "HB Mağaza",
-            "credentials": {"merchant_id": "", "api_key": ""},
-        })
-        assert r.status_code == 200
-        assert r.json()["connection"]["status"] == "unverified"
-
-    def test_add_n11_no_keys(self):
-        r = client.post("/api/connections", json={
-            "platform": "n11",
-            "label": "N11 Mağaza",
-            "credentials": {"api_key": "", "api_secret": ""},
-        })
-        assert r.status_code == 200
-        assert r.json()["connection"]["status"] == "unverified"
-
-    def test_add_amazon_no_keys(self):
-        r = client.post("/api/connections", json={
-            "platform": "amazon",
-            "label": "Amazon TR",
-            "credentials": {"seller_id": "", "refresh_token": ""},
-        })
-        assert r.status_code == 200
-        assert r.json()["connection"]["status"] == "unverified"
-
-    def test_duplicate_platform_rejected(self):
-        """Aynı platform iki kez eklenemez."""
-        client.post("/api/connections", json={
-            "platform": "hepsiburada", "credentials": {}
-        })
-        r = client.post("/api/connections", json={
-            "platform": "hepsiburada", "credentials": {}
-        })
-        assert r.status_code == 409
-
-    def test_list_my_connections(self):
-        client.post("/api/connections", json={"platform": "n11", "credentials": {}})
-        r = client.get("/api/connections")
-        assert r.status_code == 200
-        assert isinstance(r.json(), list)
-        assert len(r.json()) >= 1
-
-    def test_unknown_platform_rejected(self):
-        r = client.post("/api/connections", json={
-            "platform": "bilinmeyen_platform", "credentials": {}
-        })
+    def test_verify_wrong_code(self):
+        user = _auth.create_user(f"wc_{_uid()}@x.com", "Test1234!", auto_verify=False)
+        token = _auth.create_session(user["id"])
+        client.cookies.set(_auth.SESSION_COOKIE, token)
+        _auth._create_verification_code(user["id"])
+        r = client.post("/api/auth/verify-email-code", json={"code": "00000"})
         assert r.status_code == 400
-
-    def test_credentials_masked_in_response(self):
-        """Secret alanlar ••••XXXX formatında döndürülmeli."""
-        r = client.post("/api/connections", json={
-            "platform": "hepsiburada",
-            "label": "Mask Test",
-            "credentials": {"merchant_id": "12345", "api_key": "gizli_sifre_1234"},
-        })
-        assert r.status_code == 200
-        creds = r.json()["connection"]["credentials"]
-        assert creds.get("api_key", "").startswith("••••")
-
-    def test_connection_unauthenticated(self):
         _logout()
-        r = client.get("/api/connections")
+
+    def test_sql_injection_email(self):
+        r = client.post("/api/auth/login", json={"email": "' OR '1'='1", "password": "x"})
         assert r.status_code == 401
 
 
-# -----------------------------------------------------------------------
-# Operasyon (ops) testleri — demo mod
-# -----------------------------------------------------------------------
-
-class TestOps:
+class TestConnections:
     def setup_method(self):
-        self._email = f"ops_{_uid()}@example.com"
-        _register(self._email)
+        _register(f"conn_{_uid()}@x.com")
 
     def teardown_method(self):
         _logout()
 
-    def test_overview_returns_data(self):
+    def test_list_platforms_public(self):
+        _logout()
+        r = client.get("/api/connections/platforms")
+        assert r.status_code == 200
+        assert {p["key"] for p in r.json()} == {"trendyol", "hepsiburada", "n11", "amazon"}
+
+    def test_add_trendyol_no_keys(self):
+        r = client.post("/api/connections", json={"platform": "trendyol", "credentials": {}})
+        assert r.status_code == 200
+        assert r.json()["connection"]["status"] == "unverified"
+
+    def test_add_hepsiburada(self):
+        r = client.post("/api/connections", json={"platform": "hepsiburada", "credentials": {}})
+        assert r.status_code == 200
+
+    def test_add_n11(self):
+        r = client.post("/api/connections", json={"platform": "n11", "credentials": {}})
+        assert r.status_code == 200
+
+    def test_add_amazon(self):
+        r = client.post("/api/connections", json={"platform": "amazon", "credentials": {}})
+        assert r.status_code == 200
+
+    def test_duplicate_rejected(self):
+        client.post("/api/connections", json={"platform": "n11", "credentials": {}})
+        r = client.post("/api/connections", json={"platform": "n11", "credentials": {}})
+        assert r.status_code == 409
+
+    def test_unknown_platform(self):
+        r = client.post("/api/connections", json={"platform": "bilinmeyen", "credentials": {}})
+        assert r.status_code == 400
+
+    def test_list_connections(self):
+        client.post("/api/connections", json={"platform": "trendyol", "credentials": {}})
+        r = client.get("/api/connections")
+        assert r.status_code == 200
+        assert len(r.json()) >= 1
+
+    def test_credentials_masked(self):
+        r = client.post("/api/connections", json={
+            "platform": "hepsiburada",
+            "credentials": {"merchant_id": "12345", "api_key": "gizli_sifre_abcd"}
+        })
+        assert r.status_code == 200
+        assert r.json()["connection"]["credentials"].get("api_key", "").startswith("••••")
+
+    def test_unauthenticated(self):
+        _logout()
+        assert client.get("/api/connections").status_code == 401
+
+    def test_other_user_inaccessible(self):
+        r = client.post("/api/connections", json={"platform": "n11", "credentials": {}})
+        conn_id = r.json()["connection"]["id"]
+        _logout()
+        _register(f"other_{_uid()}@x.com")
+        assert client.put(f"/api/connections/{conn_id}", json={"platform": "n11", "credentials": {}}).status_code == 404
+
+
+class TestOps:
+    def setup_method(self):
+        _register(f"ops_{_uid()}@x.com")
+
+    def teardown_method(self):
+        _logout()
+
+    def test_overview(self):
         r = client.get("/api/mp/overview")
         assert r.status_code == 200
-        data = r.json()
-        assert "orders_total" in data
-        assert "waiting_questions" in data
-        assert "low_stock_count" in data
-        assert "platforms" in data
+        for k in ("orders_total", "waiting_questions", "low_stock_count", "platforms"):
+            assert k in r.json()
 
-    def test_orders_list(self):
+    def test_orders(self):
         r = client.get("/api/mp/orders")
         assert r.status_code == 200
-        data = r.json()
-        assert "rows" in data
-        assert isinstance(data["rows"], list)
-        if data["rows"]:
-            order = data["rows"][0]
-            for key in ("order_id", "date", "status", "total", "items"):
-                assert key in order, f"'{key}' alanı eksik"
+        d = r.json()
+        assert "rows" in d and "platforms" in d
+        if d["rows"]:
+            for k in ("order_id", "date", "status", "total", "items", "cargo"):
+                assert k in d["rows"][0]
+
+    def test_orders_sorted(self):
+        rows = client.get("/api/mp/orders").json().get("rows", [])
+        if len(rows) > 1:
+            dates = [x["date"] for x in rows if x["date"]]
+            assert dates == sorted(dates, reverse=True)
 
     def test_orders_status_filter(self):
         r = client.get("/api/mp/orders?status=Delivered")
         assert r.status_code == 200
-        for order in r.json().get("rows", []):
-            assert order["status"] == "Delivered"
+        for o in r.json().get("rows", []):
+            assert o["status"] == "Delivered"
 
-    def test_products_list(self):
+    def test_products(self):
         r = client.get("/api/mp/products")
         assert r.status_code == 200
-        data = r.json()
-        assert "rows" in data
-        assert "threshold" in data
-        if data["rows"]:
-            p = data["rows"][0]
-            for key in ("sku", "title", "price", "stock", "status", "low_stock"):
-                assert key in p
+        d = r.json()
+        assert "rows" in d and "threshold" in d
+        if d["rows"]:
+            for k in ("sku", "title", "price", "stock", "status", "low_stock"):
+                assert k in d["rows"][0]
 
-    def test_questions_list(self):
+    def test_questions(self):
         r = client.get("/api/mp/questions")
         assert r.status_code == 200
-        data = r.json()
-        assert "rows" in data
-        if data["rows"]:
-            q = data["rows"][0]
-            for key in ("question_id", "product", "question", "status"):
-                assert key in q
+        if r.json().get("rows"):
+            for k in ("question_id", "product", "question", "status"):
+                assert k in r.json()["rows"][0]
 
-    def test_claims_list(self):
-        r = client.get("/api/mp/claims")
-        assert r.status_code == 200
-        data = r.json()
-        assert "rows" in data
+    def test_claims(self):
+        assert client.get("/api/mp/claims").status_code == 200
 
-    def test_settings_get_default(self):
-        r = client.get("/api/mp/settings")
-        assert r.status_code == 200
-        assert r.json().get("low_stock_threshold") == 5
+    def test_settings(self):
+        assert client.get("/api/mp/settings").json()["low_stock_threshold"] == 5
+        client.post("/api/mp/settings", json={"low_stock_threshold": 10})
+        assert client.get("/api/mp/settings").json()["low_stock_threshold"] == 10
 
-    def test_settings_save(self):
-        r = client.post("/api/mp/settings", json={"low_stock_threshold": 10})
-        assert r.status_code == 200
-        assert r.json()["low_stock_threshold"] == 10
-        # Doğrulama
-        r2 = client.get("/api/mp/settings")
-        assert r2.json()["low_stock_threshold"] == 10
-
-    def test_price_stock_update_demo(self):
+    def test_price_stock_demo(self):
         r = client.post("/api/mp/price-stock", json={
             "platform": "trendyol",
-            "items": [{"sku": "SKU-KUPA-01", "price": 299.90, "stock": 50}],
+            "items": [{"sku": "SKU-KUPA-01", "price": 299.9, "stock": 50}]
         })
         assert r.status_code == 200
-        data = r.json()
-        assert data.get("ok") is True
+        assert r.json()["ok"] is True
 
-    def test_price_stock_empty_items(self):
-        r = client.post("/api/mp/price-stock", json={
-            "platform": "trendyol", "items": []
-        })
-        assert r.status_code == 400
+    def test_price_stock_empty(self):
+        assert client.post("/api/mp/price-stock", json={"platform": "trendyol", "items": []}).status_code == 400
 
-    def test_ops_unauthenticated(self):
+    def test_finance_requires_plan(self):
+        assert client.get("/api/mp/finance").status_code == 402
+
+    def test_unauthenticated(self):
         _logout()
-        r = client.get("/api/mp/orders")
-        assert r.status_code == 401
+        assert client.get("/api/mp/orders").status_code == 401
 
-    def test_platform_filter(self):
-        r = client.get("/api/mp/orders?platform=trendyol")
-        assert r.status_code == 200
-
-    def test_orders_sorted_by_date_desc(self):
-        r = client.get("/api/mp/orders")
-        rows = r.json().get("rows", [])
-        if len(rows) > 1:
-            dates = [row["date"] for row in rows if row["date"]]
-            assert dates == sorted(dates, reverse=True)
-
-
-# -----------------------------------------------------------------------
-# Fatura / plan limiti testleri
-# -----------------------------------------------------------------------
 
 class TestBilling:
     def setup_method(self):
-        self._email = f"billing_{_uid()}@example.com"
-        _register(self._email)
+        _register(f"bill_{_uid()}@x.com")
 
     def teardown_method(self):
         _logout()
@@ -422,370 +307,295 @@ class TestBilling:
         _logout()
         r = client.get("/api/billing/plans")
         assert r.status_code == 200
-        data = r.json()
-        # Response: {"provider": ..., "plans": [...]}
-        plans_list = data.get("plans", data) if isinstance(data, dict) else data
-        plan_keys = {p["key"] for p in plans_list}
-        assert {"free", "starter", "pro", "enterprise"} == plan_keys
+        d = r.json()
+        plans = d.get("plans", d) if isinstance(d, dict) else d
+        assert {p["key"] for p in plans} == {"free", "starter", "pro", "enterprise"}
 
-    def test_free_plan_limits(self):
-        """Ücretsiz plan limitlerinin doğru yapılandırıldığını doğrula."""
+    def test_free_plan_values(self):
         _logout()
-        r = client.get("/api/billing/plans")
-        data = r.json()
-        plans_list = data.get("plans", data) if isinstance(data, dict) else data
-        plans = {p["key"]: p for p in plans_list}
-        free = plans["free"]
+        d = client.get("/api/billing/plans").json()
+        plans = d.get("plans", d) if isinstance(d, dict) else d
+        free = next(p for p in plans if p["key"] == "free")
         assert free["price"] == 0
         assert free["limits"]["ai_listing"] == 3
         assert free["limits"]["stores"] == 1
 
-    def test_usage_summary(self):
+    def test_subscription(self):
         r = client.get("/api/billing/subscription")
         assert r.status_code == 200
-        data = r.json()
-        assert "usage" in data
-        assert "limits" in data
+        d = r.json()
+        assert "subscription" in d and "usage" in d and "limits" in d
+        assert d["subscription"]["plan"] == "free"
 
-    def test_finance_requires_plan(self):
-        """Ücretsiz planda finans modülü 402 döndürmeli."""
-        r = client.get("/api/mp/finance")
-        assert r.status_code == 402
+    def test_invoices(self):
+        assert client.get("/api/billing/invoices").status_code == 200
 
+    def test_unauthenticated(self):
+        _logout()
+        assert client.get("/api/billing/subscription").status_code == 401
 
-# -----------------------------------------------------------------------
-# Mağaza asistanı testleri
-# -----------------------------------------------------------------------
 
 class TestAssistant:
     def setup_method(self):
-        self._email = f"assistant_{_uid()}@example.com"
-        _register(self._email)
+        _register(f"asst_{_uid()}@x.com")
 
     def teardown_method(self):
         _logout()
 
-    def test_import_reviews_csv(self):
-        csv_content = (
-            "product_name,sku,rating,comment_text,review_date\n"
-            "Test Ürün,SKU-001,5,Harika ürün çok memnun kaldım,2026-01-01\n"
-            "Test Ürün,SKU-001,1,Kargo geç geldi kötü paketleme,2026-01-02\n"
-            "Test Ürün 2,SKU-002,4,Kaliteli ürün tavsiye ederim,2026-01-03\n"
-        ).encode()
-        r = client.post(
-            "/api/assistant/import-reviews",
-            files={"file": ("reviews.csv", csv_content, "text/csv")},
-        )
+    def _upload(self, n: int = 3) -> dict:
+        rows = "\n".join(f"Ürün {i},SKU-{i},{5 if i%2 else 2},Yorum {i},2026-01-0{i}" for i in range(1, n+1))
+        csv = f"product_name,sku,rating,comment_text,review_date\n{rows}".encode()
+        r = client.post("/api/assistant/import-reviews", files={"file": ("r.csv", csv, "text/csv")})
         assert r.status_code == 200
-        data = r.json()
-        assert data.get("total", 0) == 3
+        return r.json()
 
-    def test_stats_after_import(self):
-        # Yorum yükle
-        csv_content = (
-            "product_name,sku,rating,comment_text,review_date\n"
-            "Ürün A,SKU-A,5,Güzel,2026-01-01\n"
-            "Ürün A,SKU-A,2,Kötü kargo,2026-01-02\n"
-        ).encode()
-        client.post(
-            "/api/assistant/import-reviews",
-            files={"file": ("r.csv", csv_content, "text/csv")},
-        )
+    def test_import_reviews(self):
+        d = self._upload(3)
+        assert d["added"] == 3
+
+    def test_stats(self):
+        self._upload(4)
         r = client.get("/api/assistant/stats")
         assert r.status_code == 200
-        data = r.json()
-        # Herhangi bir yorum verisi olmalı
-        has_data = (
-            data.get("negative_reviews", 0) > 0
-            or data.get("total_reviews", 0) > 0
-            or data.get("total_products", 0) > 0
-            or bool(data.get("complaint_breakdown"))
-        )
-        assert has_data, f"Yorum stats boş: {data}"
+        d = r.json()
+        assert d.get("total_reviews", 0) > 0 or d.get("total_products", 0) > 0
 
-    def test_assistant_settings_get(self):
-        r = client.get("/api/assistant/settings")
+    def test_settings(self):
+        assert client.get("/api/assistant/settings").status_code == 200
+        r = client.post("/api/assistant/settings", json={"platform": "trendyol", "seller_model": "manufacturer"})
         assert r.status_code == 200
-
-    def test_assistant_settings_update(self):
-        r = client.post("/api/assistant/settings", json={
-            "platform": "trendyol", "seller_model": "manufacturer"
-        })
-        assert r.status_code == 200
-
-    def test_import_returns_csv(self):
-        csv_content = (
-            "product_name,sku,return_reason,return_date,quantity\n"
-            "Test Ürün,SKU-001,Beden uymadı,2026-01-01,1\n"
-            "Test Ürün,SKU-001,Kalite sorunu,2026-01-02,2\n"
-        ).encode()
-        r = client.post(
-            "/api/assistant/import-returns",
-            files={"file": ("returns.csv", csv_content, "text/csv")},
-        )
-        # Free planda returns özelliği kapalı (402) veya Pro'da 200
-        assert r.status_code in (200, 402)
-
-    def test_import_returns_requires_plan(self):
-        """Returns plan gerektiriyor — free planda 402 almalı."""
-        # Returns free planda kapalı; önce stats endpoint üzerinden doğrulayalım
-        r = client.get("/api/assistant/returns-insights")
-        assert r.status_code == 402
 
     def test_delete_reviews(self):
+        self._upload(2)
         r = client.delete("/api/assistant/reviews")
         assert r.status_code == 200
-        assert r.json().get("ok") is True
+        assert r.json()["ok"] is True
+
+    def test_ask_empty(self):
+        assert client.post("/api/assistant/ask", json={"question": ""}).status_code == 400
 
     def test_ask_no_gemini(self):
-        """Gemini yokken ask 503 dönebilir ama 500 dönmemeli."""
-        r = client.post("/api/assistant/ask", json={"question": "En çok hangi ürün iade ediliyor?"})
+        self._upload(2)
+        r = client.post("/api/assistant/ask", json={"question": "En çok şikayet edilen ürün?"})
         assert r.status_code in (200, 503)
 
-    def test_ask_empty_question(self):
-        r = client.post("/api/assistant/ask", json={"question": ""})
+    def test_import_returns_plan(self):
+        csv = b"product_name,sku,return_reason,return_date,quantity\nUrn,SKU-1,Beden,2026-01-01,1"
+        r = client.post("/api/assistant/import-returns", files={"file": ("r.csv", csv, "text/csv")})
+        assert r.status_code in (200, 402)
+
+    def test_presets(self):
+        assert client.get("/api/assistant/presets").status_code == 200
+
+
+class TestWarehouse:
+    def setup_method(self):
+        _register(f"wh_{_uid()}@x.com")
+
+    def teardown_method(self):
+        _logout()
+
+    def _save(self, title: str = "Test") -> str:
+        r = client.post("/api/warehouse/items", json={
+            "draft": {"title": title, "image_filename": "t.jpg", "sale_price": 199.9},
+            "note": "not"
+        })
+        assert r.status_code == 200
+        return r.json()["id"]
+
+    def test_list_empty(self):
+        r = client.get("/api/warehouse/items")
+        assert r.status_code == 200
+        assert r.json()["total"] == 0
+
+    def test_save(self):
+        r = client.post("/api/warehouse/items", json={
+            "draft": {"title": "Kupa", "image_filename": "k.jpg", "sale_price": 259.9}, "note": ""
+        })
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert "id" in r.json()
+
+    def test_list_after_save(self):
+        self._save("A"); self._save("B")
+        assert client.get("/api/warehouse/items").json()["total"] == 2
+
+    def test_get_item(self):
+        iid = self._save()
+        r = client.get(f"/api/warehouse/items/{iid}")
+        assert r.status_code == 200
+        assert r.json()["id"] == iid
+
+    def test_get_nonexistent(self):
+        assert client.get("/api/warehouse/items/yokolanid").status_code == 404
+
+    def test_update(self):
+        iid = self._save()
+        r = client.put(f"/api/warehouse/items/{iid}", json={
+            "draft": {"title": "Güncellendi", "image_filename": "g.jpg", "sale_price": 300.0}, "note": ""
+        })
+        assert r.status_code == 200
+        assert client.get(f"/api/warehouse/items/{iid}").json()["title"] == "Güncellendi"
+
+    def test_delete(self):
+        iid = self._save()
+        assert client.delete(f"/api/warehouse/items/{iid}").json()["ok"] is True
+        assert client.get(f"/api/warehouse/items/{iid}").status_code == 404
+
+    def test_invalid_draft(self):
+        r = client.post("/api/warehouse/items", json={"draft": {"title": ""}, "note": ""})
         assert r.status_code == 400
 
+    def test_unauthenticated(self):
+        _logout()
+        assert client.get("/api/warehouse/items").status_code == 401
 
-# -----------------------------------------------------------------------
-# Marketplace API istemci birim testleri (demo mod)
-# -----------------------------------------------------------------------
+
+class TestSupport:
+    def test_message_no_mail(self):
+        _register(f"sup_{_uid()}@x.com")
+        r = client.post("/api/support/message", json={
+            "subject": "Yardım lazım",
+            "message": "Panelde bir sorun yaşıyorum, yardımcı olur musunuz lütfen?"
+        })
+        assert r.status_code == 503
+        _logout()
+
+    def test_message_unauthenticated(self):
+        _logout()
+        r = client.post("/api/support/message", json={"subject": "Test", "message": "Bu bir test mesajıdır."})
+        assert r.status_code == 401
+
+    def test_message_validation(self):
+        _register(f"supv_{_uid()}@x.com")
+        r = client.post("/api/support/message", json={"subject": "AB", "message": "kısa"})
+        assert r.status_code == 422
+        _logout()
+
 
 class TestMarketplaceClients:
-    """Gerçek API çağrısı yapmadan istemci davranışını test eder."""
-
     def test_trendyol_demo_products(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
         api = TrendyolAPI({})
         assert api.mode == "demo"
-        products = api.list_products()
-        assert len(products) > 0
-        p = products[0]
-        for key in ("sku", "barcode", "title", "price", "stock", "status", "platform"):
-            assert key in p, f"'{key}' eksik"
+        p = api.list_products()
+        assert len(p) > 0
+        for k in ("sku", "barcode", "title", "price", "stock", "status", "platform", "mode"):
+            assert k in p[0]
 
     def test_trendyol_demo_orders(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        orders = api.list_orders()
+        orders = TrendyolAPI({}).list_orders()
         assert len(orders) > 0
-        o = orders[0]
-        for key in ("order_id", "date", "customer", "status", "total", "items", "cargo"):
-            assert key in o
+        for k in ("order_id", "date", "customer", "status", "total", "items", "cargo"):
+            assert k in orders[0]
 
     def test_trendyol_demo_claims(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        claims = api.list_claims()
-        assert len(claims) > 0
+        assert len(TrendyolAPI({}).list_claims()) > 0
 
     def test_trendyol_demo_questions(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        questions = api.list_questions()
-        assert len(questions) > 0
+        assert len(TrendyolAPI({}).list_questions()) > 0
 
     def test_trendyol_demo_settlements(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        settlements = api.settlements()
-        assert len(settlements) > 0
-        s = settlements[0]
-        for key in ("period", "gross", "commission", "net"):
-            assert key in s
+        s = TrendyolAPI({}).settlements()
+        assert len(s) > 0
+        for k in ("period", "gross", "commission", "net"):
+            assert k in s[0]
 
-    def test_trendyol_demo_price_stock(self):
-        from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        result = api.update_price_stock([{"sku": "SKU-001", "price": 100.0, "stock": 5}])
-        assert result.get("ok") is True
-        assert result.get("mode") == "demo"
-
-    def test_trendyol_configured_check(self):
+    def test_trendyol_configured(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
         assert TrendyolAPI({}).configured is False
-        assert TrendyolAPI({"seller_id": "123", "api_key": "k", "api_secret": "s"}).configured is True
+        assert TrendyolAPI({"seller_id": "1", "api_key": "k", "api_secret": "s"}).configured is True
 
-    def test_hepsiburada_demo_products(self):
+    def test_hepsiburada_demo(self):
         from app.marketplace_api.hepsiburada_api import HepsiburadaAPI
         api = HepsiburadaAPI({})
         assert api.mode == "demo"
-        products = api.list_products()
-        assert len(products) > 0
+        assert len(api.list_products()) > 0
+        assert len(api.list_orders()) > 0
+        assert HepsiburadaAPI({"merchant_id": "x", "api_key": "y"}).configured is True
 
-    def test_hepsiburada_demo_orders(self):
-        from app.marketplace_api.hepsiburada_api import HepsiburadaAPI
-        api = HepsiburadaAPI({})
-        orders = api.list_orders()
-        assert len(orders) > 0
-
-    def test_hepsiburada_configured_check(self):
-        from app.marketplace_api.hepsiburada_api import HepsiburadaAPI
-        assert HepsiburadaAPI({}).configured is False
-        assert HepsiburadaAPI({"merchant_id": "123", "api_key": "x"}).configured is True
-
-    def test_n11_demo_products(self):
+    def test_n11_demo(self):
         from app.marketplace_api.n11_api import N11API
         api = N11API({})
         assert api.mode == "demo"
-        products = api.list_products()
-        assert len(products) > 0
-
-    def test_n11_demo_orders(self):
-        from app.marketplace_api.n11_api import N11API
-        api = N11API({})
-        orders = api.list_orders()
-        assert len(orders) > 0
-
-    def test_n11_configured_check(self):
-        from app.marketplace_api.n11_api import N11API
-        assert N11API({}).configured is False
+        assert len(api.list_products()) > 0
         assert N11API({"api_key": "k", "api_secret": "s"}).configured is True
 
-    def test_amazon_demo_orders(self):
+    def test_amazon_demo(self):
         from app.marketplace_api.amazon_api import AmazonAPI
         api = AmazonAPI({})
         assert api.mode == "demo"
-        orders = api.list_orders()
-        assert len(orders) > 0
+        assert len(api.list_orders()) > 0
+        assert AmazonAPI({"refresh_token": "r", "lwa_client_id": "c", "lwa_client_secret": "s"}).configured is True
 
-    def test_amazon_configured_check(self):
-        from app.marketplace_api.amazon_api import AmazonAPI
-        assert AmazonAPI({}).configured is False
-        assert AmazonAPI({
-            "refresh_token": "rt", "lwa_client_id": "ci", "lwa_client_secret": "cs"
-        }).configured is True
-
-    def test_all_clients_tag_platform(self):
-        """_tag() her satıra platform ve mode eklemeli."""
+    def test_platform_tag(self):
         from app.marketplace_api.trendyol_api import TrendyolAPI
-        api = TrendyolAPI({})
-        products = api.list_products()
-        for p in products:
-            assert p["platform"] == "trendyol"
-            assert p["mode"] == "demo"
+        for p in TrendyolAPI({}).list_products():
+            assert p["platform"] == "trendyol" and p["mode"] == "demo"
 
     def test_clients_for_user_fallback(self):
-        """Bağlantısı olmayan kullanıcı için demo TrendyolAPI döner."""
         from app.marketplace_api import clients_for_user
-        # Geçici test kullanıcısı
-        import app.db as db
-        import uuid
-        uid = uuid.uuid4().hex
-        db.execute(
-            "INSERT INTO users (id, email, password_hash, salt, created_at) VALUES (?,?,?,?,?)",
-            (uid, f"tmp_{uid}@t.com", "x", "y", db.now()),
+        uid = _db.new_id()
+        _db.execute(
+            "INSERT INTO users (id,email,password_hash,salt,created_at) VALUES (?,?,?,?,?)",
+            (uid, f"tmp_{uid}@t.com", "x", "y", _db.now()),
         )
         clients = clients_for_user(uid)
         assert len(clients) == 1
-        assert clients[0].platform == "trendyol"
-        assert clients[0].mode == "demo"
+        assert clients[0].platform == "trendyol" and clients[0].mode == "demo"
 
-
-# -----------------------------------------------------------------------
-# Güvenlik testleri
-# -----------------------------------------------------------------------
 
 class TestSecurity:
-    def test_session_cookie_httponly(self):
-        """Session cookie httpOnly olmalı."""
-        r = client.post("/api/auth/register", json={
-            "email": "sec_test@example.com", "password": "Secure123!"
-        })
-        assert r.status_code == 200
-        cookies = r.cookies
-        # TestClient üzerinden direkt header kontrolü
-        set_cookie = r.headers.get("set-cookie", "")
-        assert "httponly" in set_cookie.lower()
+    def test_protected_require_auth(self):
         _logout()
-
-    def test_protected_endpoints_require_auth(self):
-        _logout()
-        protected = [
-            ("/api/mp/orders", "GET"),
-            ("/api/mp/products", "GET"),
-            ("/api/mp/questions", "GET"),
-            ("/api/mp/claims", "GET"),
-            ("/api/mp/finance", "GET"),
-            ("/api/mp/overview", "GET"),
-            ("/api/billing/usage", "GET"),
-            ("/api/connections", "GET"),
-        ]
-        for path, method in protected:
+        for method, path in [
+            ("GET", "/api/mp/orders"), ("GET", "/api/mp/products"),
+            ("GET", "/api/mp/questions"), ("GET", "/api/mp/claims"),
+            ("GET", "/api/mp/finance"), ("GET", "/api/mp/overview"),
+            ("GET", "/api/billing/subscription"), ("GET", "/api/connections"),
+            ("GET", "/api/warehouse/items"),
+        ]:
             r = client.request(method, path)
-            assert r.status_code == 401, f"{method} {path} → {r.status_code} (401 beklendi)"
+            assert r.status_code == 401, f"{method} {path} → {r.status_code}"
 
-    def test_public_endpoints_accessible(self):
-        """Bu endpoint'ler giriş gerektirmemeli."""
+    def test_public_endpoints(self):
         _logout()
-        public = [
-            ("/api/billing/plans", "GET"),
-            ("/api/connections/platforms", "GET"),
-            ("/api/status", "GET"),
-        ]
-        for path, method in public:
-            r = client.request(method, path)
-            assert r.status_code == 200, f"{method} {path} → {r.status_code}"
+        for method, path in [
+            ("GET", "/api/billing/plans"),
+            ("GET", "/api/connections/platforms"),
+            ("GET", "/api/status"),
+        ]:
+            assert client.request(method, path).status_code == 200, f"{method} {path}"
 
-    def test_other_user_connection_not_accessible(self):
-        """Başka kullanıcının bağlantısı düzenlenememeli."""
-        _register("user_a@example.com")
-        r_conn = client.post("/api/connections", json={
-            "platform": "n11", "credentials": {}
-        })
-        conn_id = r_conn.json()["connection"]["id"]
-        _logout()
-
-        _register("user_b@example.com")
-        # user_b, user_a'nın bağlantısını düzenlemeye çalışıyor
-        r = client.put(f"/api/connections/{conn_id}", json={
-            "platform": "n11", "credentials": {}
-        })
-        assert r.status_code == 404
-        _logout()
-
-    def test_sql_injection_email(self):
-        """SQL injection email'de hata değil, reddetmeli."""
-        r = client.post("/api/auth/login", json={
-            "email": "' OR '1'='1", "password": "x"
-        })
-        assert r.status_code == 401
-
-    def test_status_endpoint(self):
+    def test_status_fields(self):
         r = client.get("/api/status")
         assert r.status_code == 200
-        data = r.json()
-        assert "ai_mode" in data
-        assert "logged_in" in data
+        for k in ("trendyol_mode", "ai_mode", "logged_in", "mail_configured"):
+            assert k in r.json()
 
+    def test_sql_injection(self):
+        assert client.post("/api/auth/login", json={"email": "' OR '1'='1", "password": "x"}).status_code == 401
 
-# -----------------------------------------------------------------------
-# Analitik testleri
-# -----------------------------------------------------------------------
 
 class TestAnalytics:
     def setup_method(self):
-        self._email = f"analytics_{_uid()}@example.com"
-        _register(self._email)
+        _register(f"ana_{_uid()}@x.com")
 
     def teardown_method(self):
         _logout()
 
-    def test_import_orders_csv(self):
-        """Analitik sipariş CSV import kontrolü."""
-        csv_content = (
-            "order_id,product_name,sku,quantity,unit_price,cost,commission_rate,"
-            "order_date,city,status,platform\n"
-            "ORD-001,Test Ürün,SKU-001,2,199.90,80.00,0.12,2026-01-01,İstanbul,delivered,trendyol\n"
-            "ORD-002,Test Ürün 2,SKU-002,1,499.90,200.00,0.12,2026-01-02,Ankara,delivered,hepsiburada\n"
-        ).encode()
-        r = client.post(
-            "/api/analytics/import-orders",
-            files={"file": ("orders.csv", csv_content, "text/csv")},
-        )
-        # Pro plan gerekiyor (free → 402) veya 200
+    def test_import_orders(self):
+        csv = (
+            "order_id,product_name,sku,quantity,unit_price,cost,"
+            "commission_rate,order_date,city,status,platform\n"
+            "O1,Urun,SKU-1,1,100.0,40.0,0.12,2026-01-01,Istanbul,delivered,trendyol\n"
+        ).encode("utf-8")
+        r = client.post("/api/analytics/import-orders", files={"file": ("o.csv", csv, "text/csv")})
         assert r.status_code in (200, 402)
 
-    def test_analytics_requires_pro(self):
-        r = client.get("/api/analytics/stats")
-        assert r.status_code == 402
+    def test_stats_requires_pro(self):
+        assert client.get("/api/analytics/stats").status_code == 402

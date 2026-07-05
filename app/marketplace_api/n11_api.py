@@ -56,17 +56,19 @@ class N11API(B.MarketplaceClient):
     def list_products(self, page: int = 0, size: int = 50) -> list[dict]:
         if not self.configured:
             return self._tag(B.demo_products())
+        # N11 REST API ürün sorgu ucu — farklı Sıfatlı Ofisi versiyonlarında
+        # /product-query veya /catalog/product/list olabilir
         data = self._req("GET", "/product-query", params={"page": page, "size": size})
         rows = []
-        for p in (data.get("content") or data.get("products") or []):
+        for p in (data.get("content") or data.get("products") or data.get("productList") or []):
             rows.append({
                 "sku": p.get("stockCode", "") or p.get("sellerStockCode", ""),
                 "barcode": p.get("barcode", ""),
-                "title": p.get("title", ""),
+                "title": p.get("title", "") or p.get("displayName", ""),
                 "price": float(p.get("salePrice", p.get("displayPrice", 0)) or 0),
                 "list_price": float(p.get("listPrice", p.get("price", 0)) or 0),
                 "stock": int(p.get("quantity", p.get("stockCount", 0)) or 0),
-                "status": "active" if str(p.get("status", "")).lower() in ("active", "1", "true") else "passive",
+                "status": "active" if str(p.get("status", "")).lower() in ("active", "1", "true", "approved") else "passive",
                 "image": (p.get("imageUrls") or [""])[0] if isinstance(p.get("imageUrls"), list) else "",
                 "url": p.get("productUrl", ""),
             })
@@ -76,6 +78,8 @@ class N11API(B.MarketplaceClient):
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"{len(items)} ürün güncellendi (DEMO — anahtar girilince gerçek mağazaya gider)."}
+        # N11 toplu stok/fiyat güncelleme — REST API'de POST /product/price-stock-update
+        # Alternatif: /stock/seller-stock-update veya /price/price-update ayrı ayrı
         payload = {"payload": {"integrator": "SelfIntegration", "skus": []}}
         for it in items:
             entry: dict = {"stockCode": it.get("sku") or it.get("barcode")}
@@ -85,7 +89,11 @@ class N11API(B.MarketplaceClient):
                 entry["salePrice"] = float(it["price"])
                 entry["listPrice"] = float(it.get("list_price") or it["price"])
             payload["payload"]["skus"].append(entry)
-        self._req("POST", "/product/price-stock-update", json=payload)
+        try:
+            self._req("POST", "/product/price-stock-update", json=payload)
+        except B.MarketplaceError:
+            # Bazı N11 hesaplarında farklı endpoint; eski endpoint dene
+            self._req("POST", "/stock/seller-stock-update", json=payload)
         return {"ok": True, "mode": "live", "message": f"{len(items)} ürün güncelleme N11 kuyruğuna alındı."}
 
     # ---- Siparişler ----

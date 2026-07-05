@@ -116,9 +116,10 @@ class TrendyolAPI(B.MarketplaceClient):
             return self._tag([r for r in rows if not status or r["status"] == status])
         end = int(time.time() * 1000)
         start = end - days * 86400_000
+        # status parametresi Trendyol'a gönderilmiyor; bizim normalize
+        # ettiğimiz değer (ör. "Picking") Trendyol'daki birden fazla değere
+        # ("Picking" + "Invoiced") karşılık geldiği için yerel filtreliyoruz.
         params = {"startDate": start, "endDate": end, "size": 200, "orderByDirection": "DESC"}
-        if status:
-            params["status"] = status
         data = self._req("GET", f"/order/sellers/{self.seller_id}/orders", params=params)
         rows = []
         for o in data.get("content", []):
@@ -139,6 +140,8 @@ class TrendyolAPI(B.MarketplaceClient):
                 "items": [{"sku": l.get("merchantSku", ""), "title": l.get("productName", ""),
                            "qty": l.get("quantity", 1), "price": l.get("price", 0)} for l in lines],
             })
+        if status:
+            rows = [r for r in rows if r["status"] == status]
         return self._tag(rows)
 
     # ---- İadeler / tazmin ----
@@ -171,13 +174,12 @@ class TrendyolAPI(B.MarketplaceClient):
             return {"ok": True, "mode": "demo",
                     "message": f"İade {'onaylandı' if approve else 'reddedildi'} (DEMO)."}
         if approve:
-            # Onay: claim'in tüm kalemlerini onaylar
-            claim = next((c for c in self.list_claims() if c["claim_id"] == claim_id), None)
             self._req("PUT", f"/order/sellers/{self.seller_id}/claims/{claim_id}/items/approve",
                       json={"claimLineItemIdList": [], "params": {}})
             return {"ok": True, "mode": "live", "message": "İade onaylandı."}
+        # Trendyol docs: claimIssueReasonId request body'de gönderilmeli, query param değil
         self._req("POST", f"/order/sellers/{self.seller_id}/claims/{claim_id}/issue",
-                  params={"claimIssueReasonId": 1}, json={"description": reason or "İtiraz"})
+                  json={"claimIssueReasonId": 1, "description": reason or "İtiraz"})
         return {"ok": True, "mode": "live", "message": "İade itirazı (red) oluşturuldu."}
 
     # ---- Müşteri soruları ----

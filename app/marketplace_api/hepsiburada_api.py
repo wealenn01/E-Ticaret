@@ -105,18 +105,26 @@ class HepsiburadaAPI(B.MarketplaceClient):
             return self._tag([r for r in rows if not status or r["status"] == status])
         data = self._req(OMS_BASE, "GET", f"/packages/merchantid/{self.merchant_id}",
                          params={"offset": 0, "limit": 100})
+        # HB OMS yanıtı: {"packages": [...]} veya doğrudan liste olabilir
+        raw = data.get("packages") or data.get("items") or (data if isinstance(data, list) else [])
         rows = []
-        for pkg in (data.get("items") or data.get("packages") or []):
+        for pkg in raw:
             items = pkg.get("items") or pkg.get("lines") or []
             mapped = STATUS_MAP.get(pkg.get("status", ""), pkg.get("status", ""))
+            # Müşteri adı: recipient.name veya customerName
+            recipient = pkg.get("recipient") or {}
+            customer = recipient.get("name", "") if isinstance(recipient, dict) else str(pkg.get("customerName", ""))
+            # Toplam fiyat: {amount: ...} veya düz sayı
+            total_raw = pkg.get("totalPrice", 0) or 0
+            total = float(total_raw.get("amount", 0) if isinstance(total_raw, dict) else total_raw)
             rows.append({
                 "order_id": str(pkg.get("orderNumber", "")),
                 "package_id": str(pkg.get("packageNumber", pkg.get("id", ""))),
                 "date": str(pkg.get("orderDate", pkg.get("createdDate", "")))[:16].replace("T", " "),
-                "customer": (pkg.get("recipient") or {}).get("name", "") if isinstance(pkg.get("recipient"), dict) else str(pkg.get("customerName", "")),
+                "customer": customer,
                 "city": (pkg.get("shippingAddress") or {}).get("city", ""),
                 "status": mapped,
-                "total": float(pkg.get("totalPrice", {}).get("amount", 0) if isinstance(pkg.get("totalPrice"), dict) else pkg.get("totalPrice", 0) or 0),
+                "total": total,
                 "cargo": {
                     "carrier": pkg.get("cargoCompany", ""),
                     "tracking": str(pkg.get("barcode", "") or pkg.get("trackingNumber", "")),
