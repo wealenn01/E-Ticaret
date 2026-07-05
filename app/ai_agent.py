@@ -4,9 +4,16 @@ kategori eşleştirme ve özellik doldurma.
 Ücretsiz katman notu: varsayılan model gemini-2.5-flash (10 istek/dk, 1500 istek/gün).
 GEMINI_MODEL env değişkeniyle daha yeni bir Flash modeline geçebilirsin.
 Fiyat araştırması ücretsiz DuckDuckGo araması (ddgs) ile yapılır.
+
+Görsel üretimi maliyet optimizasyonu:
+- Hibrit mimari: ucuz metin modeli (TEXT_MODEL) prompt yazar, görsel modeli (IMAGE_MODEL) üretir.
+- Context caching: referans fotoğraf oturum boyunca cache'lenir, 4 sahne için tekrar gönderilmez.
+- Batch mod: GEMINI_IMAGE_BATCH=true ile %50 indirimli toplu üretim.
+- Çözünürlük: Trendyol/HB standardı 1200×1800 (2:3), gereksiz yüksek çözünürlük üretilmez.
 """
 import base64
 import difflib
+import io
 import json
 import os
 import re
@@ -17,12 +24,31 @@ from ddgs import DDGS
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from .models import AttributeFill, CategoryChoice, PriceSuggestion, ProductAnalysis, ScenePlan
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Ucuz metin modeli — sahne planlama ve prompt zenginleştirme (~$0.10/M token)
+TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash-lite")
+# Görsel modeli — referans fotoğrafı koruyarak sahne üretir (Imagen text-only değil)
 IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+IMAGE_ASPECT_RATIO = os.getenv("GEMINI_IMAGE_ASPECT_RATIO", "2:3")  # Trendyol 1200×1800
+IMAGE_OUTPUT_SIZE = (
+    int(os.getenv("GEMINI_IMAGE_OUTPUT_WIDTH", "1200")),
+    int(os.getenv("GEMINI_IMAGE_OUTPUT_HEIGHT", "1800")),
+)
+IMAGE_BATCH_ENABLED = os.getenv("GEMINI_IMAGE_BATCH", "true").lower() in ("1", "true", "yes")
+IMAGE_CACHE_ENABLED = os.getenv("GEMINI_IMAGE_CACHE", "true").lower() in ("1", "true", "yes")
+IMAGE_CACHE_TTL = os.getenv("GEMINI_IMAGE_CACHE_TTL", "3600s")
+IMAGE_BATCH_POLL_SEC = float(os.getenv("GEMINI_IMAGE_BATCH_POLL_SEC", "5"))
+IMAGE_BATCH_TIMEOUT_SEC = float(os.getenv("GEMINI_IMAGE_BATCH_TIMEOUT_SEC", "600"))
+# JPEG: Trendyol için yeterli kalite, küçük dosya (~120–250 KB @ 1200×1800)
+IMAGE_JPEG_QUALITY = int(os.getenv("GEMINI_IMAGE_JPEG_QUALITY", "72"))
+IMAGE_DPI = int(os.getenv("GEMINI_IMAGE_DPI", "96"))
+# Referans fotoğrafı API'ye göndermeden küçült — giriş token maliyetini düşürür
+IMAGE_REF_MAX_PX = int(os.getenv("GEMINI_IMAGE_REF_MAX_PX", "768"))
 # Ana model yoğun (503) ya da kotası dolu (429) ise sırayla denenecek yedekler.
 # Her modelin ücretsiz kotası ayrı sayılır.
 FALLBACK_MODELS = [
@@ -32,6 +58,15 @@ FALLBACK_MODELS = [
 ]
 
 _client: Optional[genai.Client] = None
+# Oturum anahtarı → Gemini cached_content adı (referans fotoğraf tekrar gönderilmez)
+_image_context_cache: dict[str, str] = {}
+
+_IMAGE_GEN_SYSTEM = (
+    "You are an e-commerce product photo editor for Turkish marketplaces (Trendyol, Hepsiburada). "
+    "Keep the product in the reference photo EXACTLY unchanged: color, pattern, shape, logos, proportions. "
+    "Create only the requested scene around it. Professional listing photo quality with realistic lighting. "
+    "Portrait 2:3 framing. Do not add any text, watermark, or logo overlay."
+)
 
 
 def _get_client() -> genai.Client:
@@ -91,9 +126,10 @@ def _call_gemini(**kwargs):
     raise last
 
 
-def _generate(schema: type[BaseModel], contents, system: Optional[str] = None):
+def _generate(schema: type[BaseModel], contents, system: Optional[str] = None, model: Optional[str] = None):
     """Yapılandırılmış JSON çıktı ile Gemini çağrısı; gerekirse yedek modellere düşer."""
-    models_to_try = [MODEL] + [m for m in FALLBACK_MODELS if m != MODEL]
+    primary = model or MODEL
+    models_to_try = [primary] + [m for m in FALLBACK_MODELS if m != primary]
     response = None
     for i, model in enumerate(models_to_try):
         try:
@@ -286,46 +322,261 @@ def fill_attributes(analysis: ProductAnalysis, category_attributes: list[dict]) 
     )
 
 
-# ---- Satış görseli üretimi ----
+# ---- Satış görseli üretimi (maliyet optimize) ----
 
-def plan_scenes(analysis: ProductAnalysis) -> ScenePlan:
-    """Ürün tipine uygun 4 satış görseli sahnesi tasarlar."""
-    return _generate(
-        ScenePlan,
-        contents=(
-            f"Ürün: {analysis.title}\nTip: {analysis.product_type}\n"
-            f"Renk: {analysis.color} | Materyal: {analysis.material}\n"
-            f"Özellikler: {json.dumps(analysis.observed_attributes, ensure_ascii=False)}\n\n"
-            "Bu ürünün SATIŞ amaçlı e-ticaret görselleri için 4 FARKLI sahne tasarla. Kurallar:\n"
-            "1. Giyilebilir ürünse (tişört, elbise, ayakkabı, takı...): en az bir sahnede ürünü "
-            "gerçek bir insan model/manken giysin.\n"
-            "2. Elde kullanılan ürünse (kalem, telefon, mutfak gereci, alet...): bir sahnede "
-            "ürünü kullanan bir el/insan görünsün.\n"
-            "3. Büyük ürünse (TV, mobilya, beyaz eşya): bir sahnede ürün gerçek bir yaşam "
-            "alanına yerleştirilmiş görünsün.\n"
-            "4. Kalan sahneler çeşitlilik sağlasın: farklı açı, detay yakın çekim, temiz stüdyo "
-            "çekimi, yaşam tarzı sahnesi gibi.\n"
-            "5. Ürün tipine UYMAYAN sahne önerme (tişört için 'elde kullanım' saçma olur).\n"
-            "6. Her prompt sahneyi ayrıntılı tarif etsin: kompozisyon, ışık, arka plan, "
-            "insan varsa duruşu/kadrajı."
-        ),
+class _EnglishPrompt(BaseModel):
+    prompt: str = Field(description="Detailed English image generation prompt for the scene")
+
+
+def _analysis_summary(analysis: ProductAnalysis) -> str:
+    attrs = json.dumps(analysis.observed_attributes, ensure_ascii=False)
+    return (
+        f"Product: {analysis.title}\nType: {analysis.product_type}\n"
+        f"Brand: {analysis.brand_guess}\nColor: {analysis.color} | Material: {analysis.material}\n"
+        f"Attributes: {attrs}"
     )
 
 
-def generate_marketing_image(image_bytes: bytes, media_type: str, scene_prompt: str) -> bytes:
-    """Referans ürün fotoğrafından, verilen sahneye göre satış görseli üretir."""
-    prompt = (
-        "Fotoğraftaki ürünü BİREBİR koruyarak (renk, desen, form, logo, oran değişmeyecek) "
-        f"şu sahneyi oluştur: {scene_prompt}\n"
-        "Profesyonel e-ticaret satış fotoğrafı kalitesinde olsun: gerçekçi ışık, temiz "
-        "kompozisyon, dikey 3:4 kadraj. Görsel üzerinde hiçbir yazı, filigran veya logo ekleme."
+def _prepare_reference_image(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
+    """Referans fotoğrafı API/cache için küçültür — ürün tanınır, token maliyeti düşer."""
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        w, h = img.size
+        if max(w, h) <= IMAGE_REF_MAX_PX:
+            return image_bytes, media_type
+        copy = img.copy()
+        copy.thumbnail((IMAGE_REF_MAX_PX, IMAGE_REF_MAX_PX), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        copy.convert("RGB").save(buf, format="JPEG", quality=82, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+
+
+def _image_generation_config(cached_content: Optional[str] = None) -> types.GenerateContentConfig:
+    cfg = types.GenerateContentConfig(
+        system_instruction=_IMAGE_GEN_SYSTEM,
+        response_modalities=["IMAGE"],
+        image_config=types.ImageConfig(aspect_ratio=IMAGE_ASPECT_RATIO),
     )
-    response = _call_gemini(
-        model=IMAGE_MODEL,
-        contents=[types.Part.from_bytes(data=image_bytes, mime_type=media_type), prompt],
+    if cached_content:
+        cfg.cached_content = cached_content
+    return cfg
+
+
+def _image_batch_config() -> types.GenerateContentConfig:
+    """Batch API: media_resolution ve cached_content desteklenmez — ayrı config gerekir."""
+    return types.GenerateContentConfig(
+        system_instruction=_IMAGE_GEN_SYSTEM,
+        response_modalities=["IMAGE"],
+        image_config=types.ImageConfig(aspect_ratio=IMAGE_ASPECT_RATIO),
     )
+
+
+def _extract_image_bytes(response) -> bytes:
     for cand in response.candidates or []:
         for part in (cand.content.parts if cand.content else None) or []:
             if part.inline_data and part.inline_data.data:
                 return part.inline_data.data
     raise RuntimeError("Model görsel döndürmedi: " + ((response.text or "").strip()[:200] or "boş yanıt"))
+
+
+def _resize_to_marketplace(image_bytes: bytes) -> bytes:
+    """Trendyol standardı: 1200×1800 px, 96 DPI, JPEG — pazaryeri + küçük dosya."""
+    target_w, target_h = IMAGE_OUTPUT_SIZE
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        rgb = img.convert("RGB")
+        # Model 2K+ döndürürse önce küçült — gereksiz upscaling yapma
+        if rgb.width > target_w or rgb.height > target_h:
+            rgb.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+        if rgb.size != (target_w, target_h):
+            rgb = rgb.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        rgb.save(
+            buf,
+            format="JPEG",
+            quality=IMAGE_JPEG_QUALITY,
+            optimize=True,
+            progressive=True,
+            subsampling=2,
+            dpi=(IMAGE_DPI, IMAGE_DPI),
+        )
+        return buf.getvalue()
+
+
+def _ensure_image_cache(session_key: str, image_bytes: bytes, media_type: str, analysis: ProductAnalysis) -> Optional[str]:
+    """Referans fotoğraf + ürün bilgisini Gemini context cache'e yazar; sonraki sahnelerde tekrar kullanılır."""
+    if not IMAGE_CACHE_ENABLED:
+        return None
+    if session_key in _image_context_cache:
+        return _image_context_cache[session_key]
+    ref_bytes, ref_mime = _prepare_reference_image(image_bytes, media_type)
+    try:
+        cache = _get_client().caches.create(
+            model=IMAGE_MODEL,
+            config=types.CreateCachedContentConfig(
+                display_name=f"product-{session_key[:16]}",
+                contents=[
+                    types.Part.from_bytes(data=ref_bytes, mime_type=ref_mime),
+                    f"Reference product photo. {_analysis_summary(analysis)}",
+                ],
+                system_instruction=_IMAGE_GEN_SYSTEM,
+                ttl=IMAGE_CACHE_TTL,
+            ),
+        )
+        if cache.name:
+            _image_context_cache[session_key] = cache.name
+            return cache.name
+    except genai_errors.APIError:
+        pass  # cache desteklenmiyorsa normal modda devam et
+    return None
+
+
+def _refine_scene_prompt(analysis: ProductAnalysis, scene_label: str, scene_hint: str) -> str:
+    """Ucuz metin modeliyle sahne tarifini görsel modele uygun İngilizce prompta çevirir."""
+    result: _EnglishPrompt = _generate(
+        _EnglishPrompt,
+        model=TEXT_MODEL,
+        contents=(
+            f"{_analysis_summary(analysis)}\n\n"
+            f"Scene label (Turkish): {scene_label}\nScene concept: {scene_hint}\n\n"
+            "Write a detailed English image generation prompt for this e-commerce product photo scene. "
+            "Include: composition, lighting, background, camera angle. If a person/hand is needed, describe pose. "
+            "The reference product photo will be provided separately — do NOT describe changing the product itself. "
+            "Keep prompt under 120 words."
+        ),
+        system="You write concise, precise English prompts for AI product photography. Output JSON only.",
+    )
+    return result.prompt.strip()
+
+
+def plan_scenes(analysis: ProductAnalysis) -> ScenePlan:
+    """Ürün tipine uygun 4 satış görseli sahnesi tasarlar (ucuz metin modeli, ~₺0.01)."""
+    return _generate(
+        ScenePlan,
+        model=TEXT_MODEL,
+        contents=(
+            f"{_analysis_summary(analysis)}\n\n"
+            "Design 4 DIFFERENT e-commerce product photo scenes. Rules:\n"
+            "1. Scene 1: clean white/neutral studio — default listing image.\n"
+            "2. Wearables: include model shot. Handheld: in-use shot. Large items: in room.\n"
+            "3. Remaining: lifestyle, detail close-up, or alternate angle.\n"
+            "4. Each 'label': 2-4 words Turkish. Each 'prompt': concise English (max 80 words)."
+        ),
+        system="You are an e-commerce visual merchandiser. Output JSON only.",
+    )
+
+
+def generate_marketing_image(
+    image_bytes: bytes,
+    media_type: str,
+    scene_prompt: str,
+    *,
+    analysis: Optional[ProductAnalysis] = None,
+    scene_label: str = "",
+    session_key: Optional[str] = None,
+) -> bytes:
+    """Referans ürün fotoğrafından, verilen sahneye göre satış görseli üretir."""
+    prompt = scene_prompt.strip()
+    # Eski oturumlarda Türkçe kalmış promptları ucuz metin modeliyle İngilizceye çevir
+    if analysis and _looks_turkish(prompt):
+        prompt = _refine_scene_prompt(analysis, scene_label or "Sahne", prompt)
+
+    cached = _ensure_image_cache(session_key, image_bytes, media_type, analysis) if session_key and analysis else None
+    contents: list = [f"Scene: {prompt}"]  # kısa prompt — çıkış token'ı değişmez, giriş ucuz kalır
+    if not cached:
+        ref_bytes, ref_mime = _prepare_reference_image(image_bytes, media_type)
+        contents = [types.Part.from_bytes(data=ref_bytes, mime_type=ref_mime), *contents]
+
+    response = _call_gemini(
+        model=IMAGE_MODEL,
+        contents=contents,
+        config=_image_generation_config(cached),
+    )
+    return _resize_to_marketplace(_extract_image_bytes(response))
+
+
+def _looks_turkish(text: str) -> bool:
+    return bool(re.search(r"[çğıöşüÇĞİÖŞÜ]", text))
+
+
+def _batch_wait(job: types.BatchJob) -> types.BatchJob:
+    """Batch job tamamlanana kadar bekler."""
+    deadline = time.time() + IMAGE_BATCH_TIMEOUT_SEC
+    while not job.done:
+        if time.time() > deadline:
+            raise TimeoutError(f"Batch job zaman aşımı ({int(IMAGE_BATCH_TIMEOUT_SEC)} sn)")
+        time.sleep(IMAGE_BATCH_POLL_SEC)
+        job = _get_client().batches.get(name=job.name)
+    if job.state and job.state.name in ("JOB_STATE_FAILED", "JOB_STATE_CANCELLED"):
+        err = job.error.message if job.error else "Bilinmeyen batch hatası"
+        raise RuntimeError(f"Batch job başarısız: {err}")
+    return job
+
+
+def _prepare_scene_prompt(analysis: ProductAnalysis, scene) -> str:
+    prompt = scene.prompt.strip()
+    if _looks_turkish(prompt):
+        prompt = _refine_scene_prompt(analysis, scene.label, prompt)
+    return prompt
+
+
+def generate_marketing_images_batch(
+    image_bytes: bytes,
+    media_type: str,
+    scenes: list,
+    *,
+    analysis: ProductAnalysis,
+    session_key: str,
+) -> list[bytes]:
+    """Seçili sahneleri Batch API ile üretir; başarısız olanlar tek tek yeniden denenir."""
+    ref_bytes, ref_mime = _prepare_reference_image(image_bytes, media_type)
+    prepared = [(sc, _prepare_scene_prompt(analysis, sc)) for sc in scenes]
+
+    if IMAGE_BATCH_ENABLED:
+        try:
+            requests = [
+                types.InlinedRequest(
+                    contents=[
+                        types.Part.from_bytes(data=ref_bytes, mime_type=ref_mime),
+                        f"Scene: {prompt}",
+                    ],
+                    config=_image_batch_config(),
+                )
+                for _, prompt in prepared
+            ]
+            job = _get_client().batches.create(
+                model=IMAGE_MODEL,
+                src=types.BatchJobSource(inlined_requests=requests),
+            )
+            job = _batch_wait(job)
+            dest = job.dest
+            if dest and dest.inlined_responses:
+                images: list[Optional[bytes]] = [None] * len(prepared)
+                failed: list[int] = []
+                for i, item in enumerate(dest.inlined_responses):
+                    if item.error or not item.response:
+                        failed.append(i)
+                    else:
+                        try:
+                            images[i] = _resize_to_marketplace(_extract_image_bytes(item.response))
+                        except RuntimeError:
+                            failed.append(i)
+                for i in failed:
+                    sc, prompt = prepared[i]
+                    images[i] = generate_marketing_image(
+                        image_bytes, media_type, prompt,
+                        analysis=analysis, scene_label=sc.label, session_key=session_key,
+                    )
+                return images  # type: ignore[return-value]
+        except Exception:
+            pass  # tamamen başarısızsa sırayla üret
+
+    return [
+        generate_marketing_image(
+            image_bytes, media_type, prompt,
+            analysis=analysis, scene_label=sc.label, session_key=session_key,
+        )
+        for sc, prompt in prepared
+    ]
+
+
+def image_batch_enabled() -> bool:
+    return IMAGE_BATCH_ENABLED

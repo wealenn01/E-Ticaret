@@ -358,18 +358,133 @@
   .attr .name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
   .pill { display: inline-block; font-size: 12px; background: var(--sky-soft); color: #1e5a8a; border-radius: 999px; padding: 3px 11px; margin: 2px 4px 2px 0; }
 
-  .scenes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
-  .scene { border: 2px solid var(--border); border-radius: 14px; padding: 12px; text-align: center; transition: .2s; background: #fdfdff; }
-  .scene.selected { border-color: var(--lilac); background: var(--lilac-soft); box-shadow: 0 0 0 3px rgba(139,124,246,.13); }
-  .scene img { width: 100%; border-radius: 10px; display: block; }
-  .scene .sc-label { font-size: 13px; font-weight: 700; margin: 9px 0 7px; }
-  .scene .sc-row { display: flex; gap: 10px; justify-content: center; align-items: center; }
-  .scene .sc-row label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 12.5px; cursor: pointer; }
-  .scene .sc-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--lilac); }
-  .scene button.mini { width: auto; padding: 6px 12px; margin: 0; font-size: 12.5px; background: var(--card); color: var(--ink); border: 1.5px solid var(--border); border-radius: 8px; box-shadow: none; font-weight: 600; }
-  .sc-loading { padding: 46px 8px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
-  .sc-loading.spin-ic::before { content: ""; display: block; width: 22px; height: 22px; margin: 0 auto 10px; border: 3px solid var(--lilac-soft); border-top-color: var(--lilac); border-radius: 50%; animation: spin .8s linear infinite; }
-  @media (max-width: 560px) { .scenes { grid-template-columns: 1fr; } }
+  /* ---- AI Görsel Stüdyo ---- */
+  .img-studio {
+    margin-top: 8px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: linear-gradient(145deg, var(--card2) 0%, var(--card) 55%, var(--lilac-soft) 160%);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  html[data-theme="dark"] .img-studio {
+    background: linear-gradient(145deg, var(--card2) 0%, var(--card) 50%, #2a2348 140%);
+  }
+  .img-studio-hero {
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .img-studio-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--lilac-dark); background: var(--lilac-soft);
+    border-radius: 999px; padding: 4px 12px; margin-bottom: 10px;
+  }
+  html[data-theme="dark"] .img-studio-badge { color: #c4b8ff; }
+  .img-studio-hero h4 {
+    margin: 0 0 6px; font-size: 18px; font-weight: 800; letter-spacing: -.25px; color: var(--ink);
+  }
+  .img-studio-hero p {
+    margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--muted); max-width: 560px;
+  }
+  .img-studio-hero p strong { color: var(--ink); font-weight: 650; }
+  .img-studio-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .img-studio-actions button {
+    margin: 0; width: auto; flex: 0 1 auto;
+    background: linear-gradient(135deg, var(--lilac) 0%, var(--lilac-dark) 100%);
+    color: #fff; border: none; box-shadow: 0 4px 14px rgba(139,124,246,.35);
+  }
+  .img-studio-actions button:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 6px 18px rgba(139,124,246,.45); }
+  .img-studio-actions button:disabled { opacity: .55; filter: none; box-shadow: none; }
+  .img-scene-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+    padding: 18px 20px 22px;
+  }
+  .img-card { display: flex; flex-direction: column; gap: 9px; }
+  .img-frame {
+    position: relative;
+    aspect-ratio: 2 / 3; width: 100%;
+    border-radius: 13px; overflow: hidden;
+    background: var(--line-soft); border: 1.5px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .img-card.ready .img-frame { cursor: pointer; border-color: var(--border); }
+  .img-card.ready .img-frame:hover { box-shadow: 0 8px 22px rgba(43,38,64,.12); }
+  html[data-theme="dark"] .img-card.ready .img-frame:hover { box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+  .img-frame img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity .2s, filter .2s; }
+  .img-card.ready:not(.selected) .img-frame img { opacity: .48; filter: grayscale(.3); }
+  .img-card.selected .img-frame { border-color: var(--lilac); box-shadow: 0 0 0 3px rgba(139,124,246,.28); }
+
+  .img-sel {
+    position: absolute; top: 8px; right: 8px;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; color: #fff;
+    background: var(--lilac); box-shadow: 0 2px 6px rgba(43,38,64,.25);
+    transition: transform .15s, background .15s;
+  }
+  .img-card.ready:not(.selected) .img-sel { background: rgba(255,255,255,.9); color: var(--muted); box-shadow: 0 1px 4px rgba(43,38,64,.18); }
+  html[data-theme="dark"] .img-card.ready:not(.selected) .img-sel { background: rgba(28,24,50,.85); }
+
+  .img-refresh {
+    position: absolute; top: 8px; left: 8px;
+    width: 28px; height: 28px; border-radius: 50%; padding: 0; margin: 0;
+    border: none; cursor: pointer;
+    background: rgba(255,255,255,.92); color: var(--ink);
+    font-size: 14px; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .15s, background .15s;
+    box-shadow: 0 2px 6px rgba(43,38,64,.2);
+  }
+  .img-frame:hover .img-refresh { opacity: 1; }
+  .img-refresh:hover { background: #fff; color: var(--lilac-dark); }
+  html[data-theme="dark"] .img-refresh { background: rgba(28,24,50,.92); color: var(--ink); }
+
+  .img-gen-btn {
+    width: 100%; height: 100%; margin: 0; padding: 12px; border: none;
+    background: transparent; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px;
+    transition: background .18s;
+  }
+  .img-gen-btn:hover { background: var(--lilac-soft); }
+  html[data-theme="dark"] .img-gen-btn:hover { background: rgba(139,124,246,.1); }
+  .img-gen-btn .ic {
+    width: 42px; height: 42px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; font-weight: 300;
+    background: var(--card); border: 1.5px dashed var(--border); color: var(--lilac);
+    transition: border-color .18s, transform .18s;
+  }
+  .img-gen-btn:hover .ic { border-color: var(--lilac); transform: scale(1.06); }
+  .img-gen-btn .lbl { color: var(--muted); font-weight: 600; font-size: 11.5px; line-height: 1.3; text-align: center; }
+
+  .img-card-label {
+    text-align: center; font-size: 12.5px; font-weight: 700; color: var(--ink);
+    line-height: 1.3; padding: 0 2px;
+  }
+  .img-card.ready:not(.selected) .img-card-label { color: var(--muted); }
+
+  .img-loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 9px; padding: 16px 8px; text-align: center;
+    font-size: 11.5px; font-weight: 600; color: var(--lilac-dark); line-height: 1.4;
+  }
+  html[data-theme="dark"] .img-loading { color: #c4b8ff; }
+  .img-loading::before {
+    content: ""; width: 24px; height: 24px;
+    border: 2.5px solid var(--lilac-soft); border-top-color: var(--lilac);
+    border-radius: 50%; animation: spin .75s linear infinite;
+  }
+  .img-grid-hint {
+    margin: 0 20px 20px; font-size: 12.5px; color: var(--muted); line-height: 1.5;
+  }
+  @media (max-width: 900px) { .img-scene-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) {
+    .img-studio-hero { padding: 18px 16px 14px; }
+    .img-scene-grid { grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 12px 18px; }
+    .img-studio-actions { flex-direction: column; align-items: stretch; }
+    .img-studio-actions button { width: 100%; }
+  }
 
   .result { border-radius: 14px; padding: 20px; font-size: 14.5px; line-height: 1.6; }
   .result.ok { background: #e5f7ec; color: #14532d; }
@@ -998,10 +1113,19 @@
       <h3 class="sec">Özellikler</h3>
       <div id="attrList"></div>
 
-      <h3 class="sec">🎨 Satış Görselleri (AI)</h3>
-      <p class="hint" style="margin-top:0">Ürün tipine göre mankenli / kullanım senaryolu / farklı açılı 4 profesyonel satış görseli üretilir. Beğendiklerini işaretle — ilana eklenir.</p>
-      <button class="secondary" id="genImagesBtn" style="margin-top:8px">🎨 4 Satış Görseli Oluştur</button>
-      <div id="sceneGrid" class="scenes hidden"></div>
+      <h3 class="sec">🎨 Ürün Görselleri</h3>
+      <div class="img-studio" id="imgStudio">
+        <div class="img-studio-hero">
+          <span class="img-studio-badge">✨ Görsel Stüdyo</span>
+          <h4>Satışa hazır ürün görselleri</h4>
+          <p>Ürününüz için farklı satış sahneleri hazırlanır. Beğendiğiniz görselleri seçip ilana ekleyin.</p>
+          <div class="img-studio-actions">
+            <button id="genImagesBtn">✨ Görselleri Oluştur</button>
+          </div>
+        </div>
+        <div id="sceneGrid" class="img-scene-grid hidden"></div>
+        <p class="img-grid-hint hidden" id="imgGridHint">İşaretli görseller ilana eklenir. Bir görseli eklemek veya çıkarmak için üzerine tıklayın.</p>
+      </div>
 
       <h3 class="sec">Fiyat & Stok</h3>
       <div class="hint" id="priceReason" style="margin-bottom:8px"></div>
@@ -1330,7 +1454,7 @@ function demoNote(elId, platforms) {
   const el = $(elId);
   if (!el) return;
   if (demos.length) {
-    el.textContent = '🧪 ' + demos.join(', ') + ' bağlantısında API anahtarı yok — örnek veri gösteriliyor. Anahtarları Hesabım > Mağaza Bağla\'dan girince gerçek mağaza verisi gelir.';
+    el.textContent = '🔗 ' + demos.join(', ') + ' henüz bağlı değil — örnek veriler gösteriliyor. Hesabım > Mağaza Bağla adımını tamamlayınca gerçek mağaza verileriniz gelir.';
     el.classList.remove('hidden');
   } else el.classList.add('hidden');
 }
@@ -1406,7 +1530,7 @@ async function loadWebhooks() {
     $('whList').innerHTML = (w.rows || []).length ? w.rows.map(h =>
       '<div class="filters" style="margin:0 0 6px"><code style="font-size:12px">' + esc(h.url) + '</code>' +
       '<button class="mini-btn danger" onclick="delWebhook(\'' + esc(h.id) + '\')">Sil</button></div>').join('')
-      : '<p class="hint">Kayıtlı webhook yok.' + (w.mode === 'demo' ? ' (Trendyol anahtarı girilince gerçek kayıt yapılır.)' : '') + '</p>';
+      : '<p class="hint">Kayıtlı webhook yok.' + (w.mode === 'demo' ? ' Mağazanızı bağladığınızda kayıtlar burada görünür.' : '') + '</p>';
   } catch (e) { $('whList').innerHTML = '<p class="hint">' + esc(e.message) + '</p>'; }
 }
 async function addWebhook() {
@@ -1597,7 +1721,7 @@ async function loadFinance() {
     ].map(k => '<div class="kpi"><div class="k-lbl">' + k[0] + '</div><div class="k-val">' + k[1] + '</div></div>').join('');
     $('finTable').innerHTML = '<tr><th>Dönem</th><th>Platform</th><th class="num">Brüt</th><th class="num">Komisyon</th><th class="num">İade</th><th class="num">Net</th><th>Ödeme</th></tr>' +
       (d.rows.length ? d.rows.map(r =>
-        '<tr><td>' + esc(r.period) + '</td><td>' + platTag(r.platform) + (r.mode === 'demo' ? ' <span class="hint" style="font-size:10px">(demo)</span>' : '') + '</td>' +
+        '<tr><td>' + esc(r.period) + '</td><td>' + platTag(r.platform) + (r.mode === 'demo' ? ' <span class="hint" style="font-size:10px">(örnek)</span>' : '') + '</td>' +
         '<td class="num">' + fmtTL(r.gross) + '</td><td class="num">−' + fmtTL(r.commission) + '</td>' +
         '<td class="num">−' + fmtTL(r.refunds) + '</td><td class="num"><strong>' + fmtTL(r.net) + '</strong></td>' +
         '<td>' + esc(r.payout_date || '—') + '</td></tr>').join('')
@@ -1669,8 +1793,7 @@ async function suggestPrice(idx, btn) {
 api('/api/status').then(s => {
   const mk = (txt, live) => '<span class="badge' + (live ? ' live' : '') + '">' + txt + '</span>';
   $('badges').innerHTML =
-    mk(s.trendyol_mode === 'mock' ? 'Trendyol: DEMO' : 'Trendyol: ' + s.trendyol_mode.toUpperCase(), s.trendyol_mode !== 'mock') +
-    mk(s.ai_mode === 'demo' ? 'AI: DEMO' : 'AI: CANLI', s.ai_mode === 'live');
+    mk(s.trendyol_mode === 'mock' ? 'Trendyol: Bağlı değil' : 'Trendyol: Bağlı', s.trendyol_mode !== 'mock');
 }).catch(() => {});
 
 // ================= SATIŞ ANALİZİ =================
@@ -1874,7 +1997,11 @@ $('analyzeBtn').onclick = async () => {
     fillDraftForm(data);
     show('loadingCard', false); show('draftCard'); setStep(3);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (data.photo_count > 1) toast(data.photo_count + ' fotoğraf ile analiz tamamlandı.', 'ok');
+    if (data.ai_mode === 'demo') {
+      toast('Örnek bir taslak oluşturuldu. Bilgileri düzenleyip yayınlayabilirsiniz.', 'ok', 8000);
+    } else if (data.photo_count > 1) {
+      toast(data.photo_count + ' fotoğraf ile analiz tamamlandı.', 'ok');
+    }
   } catch (e) {
     show('loadingCard', false); show('uploadCard'); setStep(1);
     toast(e.message, 'err', 12000);
@@ -1948,59 +2075,128 @@ $('f_category').addEventListener('blur', () => {
   }, 200);
 });
 
+function uploadPreviewUrl(filename) {
+  return '/api/uploads/' + filename + '?preview=1';
+}
+
 let scenes = [], genFiles = {}, genSelected = new Set();
 
-$('genImagesBtn').onclick = async () => {
+function pendingSceneIndices() {
+  return scenes.map((_, i) => i).filter(i => !genFiles[i]);
+}
+
+function updateMainBtn() {
   const btn = $('genImagesBtn');
-  btn.disabled = true; btn.textContent = '🎬 Sahneler planlanıyor…';
+  if (!scenes.length) {
+    btn.classList.remove('hidden'); btn.disabled = false;
+    btn.textContent = '✨ Görselleri Oluştur';
+    btn.onclick = planAndFirst;
+    return;
+  }
+  const pending = pendingSceneIndices();
+  if (!pending.length) { btn.classList.add('hidden'); return; }
+  btn.classList.remove('hidden'); btn.disabled = false;
+  btn.textContent = pending.length === scenes.length
+    ? '✨ Tüm görselleri oluştur'
+    : '✨ Kalan ' + pending.length + ' görseli oluştur';
+  btn.onclick = generateAll;
+}
+
+function renderSceneGrid() {
+  $('sceneGrid').innerHTML = scenes.map((s, i) => {
+    const hasImg = !!genFiles[i];
+    const sel = genSelected.has(i);
+    const frame = hasImg
+      ? '<div class="img-frame sel-toggle" data-i="' + i + '">' +
+          '<img src="' + uploadPreviewUrl(genFiles[i]) + '" loading="lazy" alt="">' +
+          '<span class="img-sel">' + (sel ? '✓' : '') + '</span>' +
+          '<button type="button" class="img-refresh regen" data-i="' + i + '" title="Yeni görsel oluştur">↻</button>' +
+        '</div>'
+      : '<div class="img-frame">' +
+          '<button type="button" class="img-gen-btn gen-one" data-i="' + i + '">' +
+            '<span class="ic">+</span><span class="lbl">Oluştur</span>' +
+          '</button>' +
+        '</div>';
+    return '<article class="img-card' + (hasImg ? ' ready' : '') + (sel ? ' selected' : '') + '" id="scene' + i + '">' +
+      frame +
+      '<div class="img-card-label">' + s.label + '</div>' +
+    '</article>';
+  }).join('');
+
+  $('sceneGrid').querySelectorAll('.sel-toggle').forEach(f => f.onclick = () => toggleSelect(+f.dataset.i));
+  $('sceneGrid').querySelectorAll('.regen').forEach(b => b.onclick = (e) => { e.stopPropagation(); genOne(+b.dataset.i); });
+  $('sceneGrid').querySelectorAll('.gen-one').forEach(b => b.onclick = () => genOne(+b.dataset.i));
+  $('imgGridHint').classList.toggle('hidden', !scenes.length);
+  updateMainBtn();
+}
+
+function toggleSelect(i) {
+  if (!genFiles[i]) return;
+  genSelected.has(i) ? genSelected.delete(i) : genSelected.add(i);
+  renderSceneGrid();
+}
+
+function setSceneLoading(i, msg) {
+  const cell = $('scene' + i);
+  if (!cell) return;
+  const frame = cell.querySelector('.img-frame');
+  if (frame) frame.innerHTML = '<div class="img-loading">' + msg + '</div>';
+}
+
+async function planAndFirst() {
+  const btn = $('genImagesBtn');
+  btn.disabled = true; btn.textContent = 'Hazırlanıyor…';
   try {
     const data = await api('/api/plan-scenes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_filename: draft.image_filename }) });
     scenes = data.scenes;
+    genFiles = {}; genSelected = new Set();
+    scenes.forEach((s, i) => { if (s.generated_filename) { genFiles[i] = s.generated_filename; genSelected.add(i); } });
     show('sceneGrid');
-    $('sceneGrid').innerHTML = scenes.map((s, i) =>
-      '<div class="scene" id="scene' + i + '">' +
-        '<div class="sc-img"><div class="sc-loading">Sırada bekliyor…</div></div>' +
-        '<div class="sc-label">' + s.label + '</div>' +
-        '<div class="sc-row">' +
-          '<label><input type="checkbox" data-i="' + i + '" disabled> İlana ekle</label>' +
-          '<button class="mini" data-i="' + i + '" disabled>↻ Yeniden</button>' +
-        '</div>' +
-      '</div>').join('');
-    $('sceneGrid').querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
-      const i = +cb.dataset.i;
-      cb.checked ? genSelected.add(i) : genSelected.delete(i);
-      $('scene' + i).classList.toggle('selected', cb.checked);
-    });
-    $('sceneGrid').querySelectorAll('button.mini').forEach(b => b.onclick = () => genOne(+b.dataset.i));
-    btn.textContent = '🎨 Görseller üretiliyor…';
-    for (let i = 0; i < scenes.length; i++) await genOne(i);
-    toast('Satış görselleri hazır — beğendiklerini işaretle.', 'ok', 5000);
+    renderSceneGrid();
+    if (genFiles[0]) toast('İlk görseliniz hazır. Diğer sahneleri oluşturabilirsiniz.', 'ok', 5000);
   } catch (e) {
-    toast(e.message, 'err', 10000);
-  } finally {
-    btn.disabled = false; btn.textContent = '🎨 4 Satış Görseli Oluştur';
+    toast('Görseller şu an oluşturulamadı. Lütfen biraz sonra tekrar deneyin.', 'err', 8000);
+    updateMainBtn();
   }
-};
+}
+
+async function generateAll() {
+  const pending = pendingSceneIndices();
+  if (!pending.length) return;
+  const btn = $('genImagesBtn');
+  btn.disabled = true; btn.textContent = 'Hazırlanıyor…';
+  pending.forEach(i => setSceneLoading(i, 'Hazırlanıyor…'));
+  try {
+    const data = await api('/api/generate-images-batch', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_filename: draft.image_filename, scene_indices: pending }) });
+    data.images.forEach(img => { genFiles[img.scene_index] = img.filename; genSelected.add(img.scene_index); });
+    renderSceneGrid();
+    toast(data.images.length + ' görsel hazır.', 'ok', 4000);
+  } catch (e) {
+    renderSceneGrid();
+    toast('Görseller şu an oluşturulamadı. Lütfen biraz sonra tekrar deneyin.', 'err', 8000);
+  }
+}
 
 async function genOne(i) {
-  const cell = $('scene' + i);
-  const imgBox = cell.querySelector('.sc-img');
-  const cb = cell.querySelector('input[type=checkbox]');
-  const rb = cell.querySelector('button.mini');
-  imgBox.innerHTML = '<div class="sc-loading spin-ic">Üretiliyor… (15-30 sn)</div>';
-  cb.disabled = true; rb.disabled = true;
+  setSceneLoading(i, 'Hazırlanıyor…');
   try {
     const data = await api('/api/generate-image', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_filename: draft.image_filename, scene_index: i }) });
     genFiles[i] = data.filename;
-    imgBox.innerHTML = '<img src="/api/uploads/' + data.filename + '">';
-    cb.disabled = false; rb.disabled = false;
+    genSelected.add(i);
+    renderSceneGrid();
   } catch (e) {
-    imgBox.innerHTML = '<div class="sc-loading">⚠️ ' + e.message + '</div>';
-    rb.disabled = false;
+    const frame = $('scene' + i)?.querySelector('.img-frame');
+    if (frame) frame.innerHTML =
+      '<button type="button" class="img-gen-btn gen-one" data-i="' + i + '"><span class="ic">↻</span><span class="lbl">Tekrar dene</span></button>';
+    frame?.querySelector('.gen-one')?.addEventListener('click', () => genOne(i));
+    toast('Görsel oluşturulamadı. Lütfen tekrar deneyin.', 'err', 6000);
   }
 }
+
+updateMainBtn();
 
 $('publishBtn').onclick = async () => {
   if (!collectDraftFromForm()) return;
@@ -2014,8 +2210,7 @@ $('publishBtn').onclick = async () => {
     box.innerHTML = '<span class="big-ic">' + (data.ok ? '🎉' : '⚠️') + '</span>' +
       '<strong>' + (data.ok ? 'Başarılı!' : 'Sorun var') + '</strong><br>' + data.message +
       (draft.extra_image_filenames.length ? '<br>İlana ' + (1 + draft.extra_image_filenames.length) + ' görsel eklendi.' : '') +
-      '<br><br>Batch ID: <code>' + data.batch_request_id + '</code> — Durum: ' + data.batch_status +
-      (data.failure_reasons.length ? '<br>Hatalar:<br>• ' + data.failure_reasons.join('<br>• ') : '');
+      (!data.ok && data.failure_reasons.length ? '<br><br>' + data.failure_reasons.join('<br>• ') : '');
     show('draftCard', false); show('resultCard'); setStep(4);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (e) {
@@ -2114,6 +2309,9 @@ async function openWarehouseItem(id, publishAfter) {
     warehouseEditId = rec.id;
     fillDraftForm({ draft: rec.draft, category_reasoning: '', price_examples: [] });
     scenes = []; genFiles = {}; genSelected = new Set();
+    updateMainBtn();
+    show('sceneGrid', false);
+    show('imgGridHint', false);
     show('resultCard', false);
     show('uploadCard', false);
     show('loadingCard', false);

@@ -407,7 +407,7 @@ async function loadInvoices() {
     inv.map(i => '<tr><td>' + new Date(i.created_at * 1000).toLocaleDateString('tr-TR') + '</td>' +
       '<td>' + i.plan_name + '</td><td>₺' + i.amount + '</td>' +
       '<td>**** ' + i.card_last4 + '</td><td>' + (i.status === 'paid' ? '✅ ödendi' : i.status) +
-      (i.provider === 'demo' ? ' <span class="muted">(demo)</span>' : '') + '</td></tr>').join('') + '</table>';
+      (i.provider === 'demo' ? ' <span class="muted">(deneme)</span>' : '') + '</td></tr>').join('') + '</table>';
 }
 
 load().catch(e => toast(e.message));

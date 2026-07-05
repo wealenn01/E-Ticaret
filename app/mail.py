@@ -19,6 +19,53 @@ logger = logging.getLogger("trendolai.mail")
 
 MAIL_FROM = os.getenv("MAIL_FROM", "TrendolAi <onboarding@resend.dev>")
 SUPPORT_INBOX = os.getenv("SUPPORT_EMAIL", "trendyolai0108@gmail.com").strip()
+MAIL_DEV_LOG = os.getenv("MAIL_DEV_LOG", "").lower() in ("1", "true", "yes")
+
+_PLACEHOLDER_MARKERS = (
+    "senin@gmail.com",
+    "16_haneli",
+    "uygulama_sifresi",
+    "re_xxxxxxxx",
+    "your_",
+    "example.com",
+    "changeme",
+)
+
+
+def _extract_email(addr: str) -> str:
+    if "<" in addr and "@" in addr:
+        return addr.split("<")[1].rstrip(">").strip()
+    return addr.strip()
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    v = value.strip().lower()
+    return not v or any(m in v for m in _PLACEHOLDER_MARKERS)
+
+
+def _smtp_config_issues() -> list[str]:
+    issues: list[str] = []
+    user = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
+    from_addr = _extract_email(MAIL_FROM)
+    if _looks_like_placeholder(user):
+        issues.append("SMTP_USER hâlâ şablon değerde — .env içinde gerçek Gmail adresini yaz.")
+    elif user.lower() != from_addr.lower():
+        issues.append(
+            f"SMTP_USER ({user}) ile MAIL_FROM ({from_addr}) eşleşmiyor — ikisi de aynı Gmail olmalı."
+        )
+    if not password:
+        issues.append(
+            "SMTP_PASSWORD boş — Google uygulama şifresi gerekli: "
+            "https://myaccount.google.com/apppasswords"
+        )
+    elif _looks_like_placeholder(password):
+        issues.append("SMTP_PASSWORD hâlâ şablon metin — gerçek 16 haneli uygulama şifresini yapıştır.")
+    elif len(password) != 16:
+        issues.append(
+            f"SMTP_PASSWORD {len(password)} karakter — Gmail uygulama şifresi tam 16 karakter olmalı."
+        )
+    return issues
 
 
 def _active_provider() -> str:
@@ -37,16 +84,38 @@ def provider_name() -> str:
 
 
 def is_configured() -> bool:
+    if MAIL_DEV_LOG:
+        return True
     p = _active_provider()
     if p == "resend":
-        return bool(os.getenv("RESEND_API_KEY", "").strip())
+        key = os.getenv("RESEND_API_KEY", "").strip()
+        return bool(key) and not _looks_like_placeholder(key)
     if p == "smtp":
+        if _smtp_config_issues():
+            return False
         return bool(
             os.getenv("SMTP_HOST", "").strip()
             and os.getenv("SMTP_USER", "").strip()
             and os.getenv("SMTP_PASSWORD", "").strip()
         )
     return False
+
+
+def config_status() -> dict:
+    """Arayüz / status uç noktası için mail yapılandırma özeti."""
+    provider = _active_provider() or "unconfigured"
+    issues = _smtp_config_issues() if provider == "smtp" else []
+    configured = is_configured()
+    out = {
+        "provider": provider,
+        "configured": configured,
+        "dev_log": MAIL_DEV_LOG,
+    }
+    if issues:
+        out["issues"] = issues
+    if MAIL_DEV_LOG and issues:
+        out["note"] = "MAIL_DEV_LOG açık — kodlar sunucu konsoluna yazılır, e-posta gitmez."
+    return out
 
 
 def _code_html(name: str, code: str) -> str:
@@ -67,11 +136,19 @@ def _code_text(name: str, code: str) -> str:
 
 def send_verification_code_email(to: str, code: str, name: str = "") -> dict:
     provider = _active_provider()
+    issues = _smtp_config_issues() if provider == "smtp" else []
+    if MAIL_DEV_LOG and issues:
+        logger.warning("=" * 50)
+        logger.warning("MAIL_DEV_LOG — doğrulama kodu: %s  →  %s", code, to)
+        logger.warning("=" * 50)
+        return {"ok": True, "mode": "dev_log", "dev": True}
     if not provider:
         raise RuntimeError(
             "E-posta gönderimi yapılandırılmamış. .env dosyasına RESEND_API_KEY "
             "veya SMTP_HOST + SMTP_USER + SMTP_PASSWORD ekleyin."
         )
+    if provider == "smtp" and issues:
+        raise RuntimeError(" ".join(issues))
     subject = f"TrendolAi doğrulama kodun: {code}"
     html, text = _code_html(name, code), _code_text(name, code)
     return _deliver(provider, to, subject, html, text)
@@ -142,37 +219,56 @@ def _send_resend(to: str, subject: str, html: str, text: str, reply_to: str = ""
         raise RuntimeError(f"E-posta gönderilemedi: {str(e)[:120]}") from e
 
 
+def _smtp_from_address(user: str) -> str:
+    """Gmail, giriş yapılan adresle From adresinin eşleşmesini zorunlu kılar."""
+    if "<" in MAIL_FROM and "@" in MAIL_FROM:
+        addr = MAIL_FROM.split("<")[1].rstrip(">").strip()
+        if addr.lower() == user.lower():
+            return MAIL_FROM
+    return user
+
+
+def _smtp_auth_error_hint(exc: Exception) -> str:
+    err = str(exc).lower()
+    if "535" in err or "badcredentials" in err or "username and password not accepted" in err:
+        return (
+            "Gmail kimlik doğrulaması başarısız. Normal Gmail şifresi çalışmaz — "
+            "Google hesabında 2 adımlı doğrulama açıp 'Uygulama şifresi' oluşturmalısın "
+            "(https://myaccount.google.com/apppasswords). .env içindeki SMTP_PASSWORD "
+            "bu 16 haneli uygulama şifresi olmalı; SMTP_USER ise tam Gmail adresin olmalı."
+        )
+    return f"Gmail/SMTP gönderilemedi: {str(exc)[:150]}"
+
+
 def _send_smtp(to: str, subject: str, html: str, text: str, reply_to: str = "") -> dict:
     host = os.getenv("SMTP_HOST", "").strip()
     port = int(os.getenv("SMTP_PORT", "587"))
     user = os.getenv("SMTP_USER", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "").strip()
+    # Uygulama şifreleri bazen boşluklu kopyalanır — Gmail boşluksuz bekler
+    password = os.getenv("SMTP_PASSWORD", "").replace(" ", "").strip()
     if not host or not user:
         raise RuntimeError("SMTP_HOST ve SMTP_USER tanımlı değil.")
+    if not password:
+        raise RuntimeError("SMTP_PASSWORD tanımlı değil.")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = MAIL_FROM if "@" in MAIL_FROM else user
+    msg["From"] = _smtp_from_address(user)
     msg["To"] = to
     if reply_to:
         msg["Reply-To"] = reply_to
     msg.attach(MIMEText(text, "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
 
-    frm = user
-    if "<" in MAIL_FROM:
-        frm = MAIL_FROM.split("<")[1].rstrip(">").strip()
-
     try:
         with smtplib.SMTP(host, port, timeout=20) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
-            if password:
-                server.login(user, password)
-            server.sendmail(frm, [to], msg.as_string())
+            server.login(user, password)
+            server.sendmail(user, [to], msg.as_string())
         logger.info("SMTP e-posta gönderildi: %s", to)
         return {"ok": True, "mode": "smtp"}
     except smtplib.SMTPException as e:
         logger.exception("SMTP gönderim hatası")
-        raise RuntimeError(f"Gmail/SMTP gönderilemedi: {str(e)[:150]}") from e
+        raise RuntimeError(_smtp_auth_error_hint(e)) from e

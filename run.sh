@@ -14,8 +14,8 @@ if [ ! -d .venv ]; then
 fi
 source .venv/bin/activate
 
-# 2) Bağımlılıklar eksikse kur (hızlı kontrol: fastapi + google-genai)
-if ! python -c "import fastapi, google.genai" >/dev/null 2>&1; then
+# 2) Bağımlılıklar eksikse kur (hızlı kontrol: fastapi + google-genai + Pillow)
+if ! python -c "import fastapi, google.genai, PIL" >/dev/null 2>&1; then
   echo "📦 Bağımlılıklar kuruluyor…"
   pip install -q -r requirements.txt
 fi
@@ -27,4 +27,8 @@ if [ ! -f .env ]; then
 fi
 
 echo "🚀 http://127.0.0.1:${PORT} adresinde başlatılıyor… (durdurmak için Ctrl+C)"
-exec uvicorn app.main:app --reload --port "$PORT"
+exec uvicorn app.main:app --reload \
+  --reload-exclude '.venv/*' \
+  --reload-exclude 'data/*' \
+  --reload-exclude 'uploads/*' \
+  --port "$PORT"

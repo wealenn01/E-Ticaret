@@ -8,7 +8,7 @@ if not exist .venv (
 
 call .venv\Scripts\activate.bat
 
-python -c "import fastapi, google.genai" 2>nul
+python -c "import fastapi, google.genai, PIL" 2>nul
 if errorlevel 1 (
   echo Bagimliliklar kuruluyor...
   pip install -r requirements.txt
@@ -23,4 +23,4 @@ set PORT=%1
 if "%PORT%"=="" set PORT=8000
 
 echo http://127.0.0.1:%PORT% adresinde baslatiliyor...
-uvicorn app.main:app --reload --port %PORT%
+uvicorn app.main:app --reload --reload-exclude ".venv/*" --reload-exclude "data/*" --reload-exclude "uploads/*" --port %PORT%

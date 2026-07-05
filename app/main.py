@@ -12,12 +12,20 @@ from typing import Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
+
+def _reload_env() -> None:
+    """.env değişikliklerini sunucu yeniden başlatılmadan okur."""
+    if ENV_PATH.is_file():
+        load_dotenv(ENV_PATH, override=True)
 
 from . import ai_agent  # noqa: E402  (load_dotenv önce çalışmalı)
 from . import ai_seller  # noqa: E402
@@ -31,6 +39,7 @@ from . import support  # noqa: E402
 from . import warehouse  # noqa: E402
 from .models import (  # noqa: E402
     GenerateImageRequest,
+    GenerateImagesBatchRequest,
     ProductAnalysis,
     ProductDraft,
     PublishResult,
@@ -47,6 +56,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 USERS_DATA_DIR = BASE_DIR.parent / "data" / "users"
 
 _logger = logging.getLogger(__name__)
+
+_USER_IMG_ERR = "Görsel şu an oluşturulamadı. Lütfen biraz sonra tekrar deneyin."
 
 
 @asynccontextmanager
@@ -143,6 +154,10 @@ def _session_key(user_id: str, filename: str) -> Tuple[str, str]:
     return user_id, Path(filename).name
 
 
+def _image_cache_key(user_id: str, filename: str) -> str:
+    return f"{user_id}:{Path(filename).name}"
+
+
 def _user_upload_dir(user_id: str) -> Path:
     d = USERS_DATA_DIR / user_id / "uploads"
     d.mkdir(parents=True, exist_ok=True)
@@ -203,7 +218,8 @@ def _get_session(user_id: str, filename: str) -> Optional[dict]:
 
 def _ai_available() -> bool:
     """Gemini API anahtarı var mı? Yoksa analiz adımı demo veriyle çalışır."""
-    return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+    _reload_env()
+    return bool((os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip())
 
 
 @app.exception_handler(genai_errors.APIError)
@@ -271,24 +287,37 @@ def status(request: Request):
     if user:
         c = marketplaces.trendyol_client_for(user["id"])
         trendyol_mode = c.mode_name
+    mail_info = mail.config_status()
     return {
         "trendyol_mode": trendyol_mode,
         "ai_mode": "live" if _ai_available() else "demo",
         "imgbb_configured": bool(os.getenv("IMGBB_API_KEY")),
         "logged_in": bool(user),
         "email_verified": bool(user and auth.is_email_verified(user)),
-        "mail_configured": mail.is_configured(),
-        # mail_provider sunucu yapılandırması — yalnızca giriş yapılmış kullanıcıya gösterilir
-        **(  {"mail_provider": mail.provider_name()} if user else {} ),
+        "mail_configured": mail_info["configured"],
+        "mail": mail_info,
+        **({"mail_provider": mail_info["provider"]} if user else {}),
     }
 
 
 @app.get("/api/uploads/{filename}")
-def get_upload(filename: str, request: Request):
-    """Kullanıcıya ait yüklenen görseli oturumla sunar."""
+def get_upload(filename: str, request: Request, preview: bool = False):
+    """Kullanıcıya ait yüklenen görseli oturumla sunar. preview=1 → panel önizlemesi (~400px)."""
     user_id = _current_user(request)["id"]
     path = _safe_upload(user_id, filename)
     media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    if preview:
+        try:
+            from PIL import Image
+            import io as _io
+            with Image.open(path) as img:
+                thumb = img.convert("RGB")
+                thumb.thumbnail((400, 600), Image.Resampling.LANCZOS)
+                buf = _io.BytesIO()
+                thumb.save(buf, format="JPEG", quality=70, optimize=True)
+                return Response(content=buf.getvalue(), media_type="image/jpeg")
+        except Exception:
+            pass  # önizleme başarısızsa orijinali sun
     return FileResponse(path, media_type=media.get(path.suffix.lower(), "application/octet-stream"))
 
 
@@ -324,6 +353,11 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
     if not _ai_available():
         result = _demo_analysis(primary_filename, trendyol)
         result["draft"]["source_image_filenames"] = all_filenames
+        result["ai_mode"] = "demo"
+        result["demo_reason"] = (
+            "GEMINI_API_KEY bulunamadı. .env dosyasına anahtarı ekle, kaydet (Cmd+S) "
+            "ve tekrar dene. Anahtar: https://aistudio.google.com/apikey"
+        )
         return result
 
     try:
@@ -361,6 +395,7 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
         "category_reasoning": category.reasoning,
         "estimated_range": [analysis.estimated_price_min_try, analysis.estimated_price_max_try],
         "photo_count": len(all_filenames),
+        "ai_mode": "live",
     }
 
 
@@ -401,17 +436,39 @@ def recategorize(req: RecategorizeRequest, request: Request):
 
 @app.post("/api/plan-scenes")
 def plan_scenes(req: SceneRequest, request: Request):
-    """Rün tipine uygun 4 satış görseli sahnesi planlar."""
+    """Sahne planı + ilk görseli üretip döner (1 AI kredi)."""
     if not _ai_available():
         raise HTTPException(503, "Görsel üretimi için GEMINI_API_KEY gerekli (AI şu an demo modda).")
     user_id = _current_user(request)["id"]
+    billing.verify_limit(user_id, "image_gen")
     session = _get_session(user_id, req.image_filename)
     if session is None:
         raise HTTPException(404, "Analiz oturumu bulunamadı — fotoğrafı yeniden analiz et.")
     if "scenes" not in session:
         session["scenes"] = ai_agent.plan_scenes(session["analysis"]).scenes
         _save_session(user_id, req.image_filename)
-    return {"scenes": [s.model_dump() for s in session["scenes"]]}
+
+    scenes = session["scenes"]
+    src = _safe_upload(user_id, req.image_filename)
+    mime = SUFFIX_TO_MIME.get(src.suffix, "image/jpeg")
+    sk = _image_cache_key(user_id, req.image_filename)
+
+    first_filename: Optional[str] = None
+    try:
+        img_bytes = ai_agent.generate_marketing_image(
+            src.read_bytes(), mime, scenes[0].prompt,
+            analysis=session["analysis"], scene_label=scenes[0].label, session_key=sk,
+        )
+        first_filename = f"gen_{uuid.uuid4().hex}.jpg"
+        (_user_upload_dir(user_id) / first_filename).write_bytes(img_bytes)
+        billing.consume_limit(user_id, "image_gen")
+    except Exception:
+        pass  # ilk görsel başarısız olursa sahneler yine döner, kullanıcı yeniden üretebilir
+
+    scene_list = [s.model_dump() for s in scenes]
+    if first_filename:
+        scene_list[0]["generated_filename"] = first_filename
+    return {"scenes": scene_list}
 
 
 @app.post("/api/generate-image")
@@ -434,15 +491,73 @@ def generate_image(req: GenerateImageRequest, request: Request):
     src = _safe_upload(user_id, req.image_filename)
     mime = SUFFIX_TO_MIME.get(src.suffix, "image/jpeg")
     scene = scenes[req.scene_index]
+    sk = _image_cache_key(user_id, req.image_filename)
     try:
-        image_bytes = ai_agent.generate_marketing_image(src.read_bytes(), mime, scene.prompt)
+        image_bytes = ai_agent.generate_marketing_image(
+            src.read_bytes(),
+            mime,
+            scene.prompt,
+            analysis=session["analysis"],
+            scene_label=scene.label,
+            session_key=sk,
+        )
     except Exception as e:
-        raise HTTPException(502, f"Görsel üretilemedi: {str(e)[:200]}")
+        _logger.exception("generate-image failed scene=%s", req.scene_index)
+        raise HTTPException(502, _USER_IMG_ERR)
 
-    filename = f"gen_{uuid.uuid4().hex}.png"
+    filename = f"gen_{uuid.uuid4().hex}.jpg"
     (_user_upload_dir(user_id) / filename).write_bytes(image_bytes)
     billing.consume_limit(user_id, "image_gen")
     return {"filename": filename, "label": scene.label, "scene_index": req.scene_index}
+
+
+@app.post("/api/generate-images-batch")
+def generate_images_batch(req: GenerateImagesBatchRequest, request: Request):
+    """Seçili sahneleri toplu üretir (mümkünse indirimli batch, değilse sırayla)."""
+    if not _ai_available():
+        raise HTTPException(503, "Görsel üretimi şu an kullanılamıyor.")
+    user_id = _current_user(request)["id"]
+    session = _get_session(user_id, req.image_filename)
+    if session is None:
+        raise HTTPException(404, "Ürün oturumu bulunamadı — lütfen fotoğrafı yeniden analiz edin.")
+    if "scenes" not in session:
+        session["scenes"] = ai_agent.plan_scenes(session["analysis"]).scenes
+        _save_session(user_id, req.image_filename)
+    scenes = session["scenes"]
+
+    if req.scene_indices is not None:
+        indices = [i for i in req.scene_indices if 0 <= i < len(scenes)]
+    else:
+        indices = list(range(len(scenes)))
+    if not indices:
+        raise HTTPException(400, "Oluşturulacak görsel seçilmedi.")
+
+    billing.verify_limit(user_id, "image_gen", amount=len(indices))
+
+    src = _safe_upload(user_id, req.image_filename)
+    image_bytes = src.read_bytes()
+    mime = SUFFIX_TO_MIME.get(src.suffix, "image/jpeg")
+    sk = _image_cache_key(user_id, req.image_filename)
+    selected = [scenes[i] for i in indices]
+    try:
+        image_list = ai_agent.generate_marketing_images_batch(
+            image_bytes,
+            mime,
+            selected,
+            analysis=session["analysis"],
+            session_key=sk,
+        )
+    except Exception as e:
+        _logger.exception("generate-images-batch failed")
+        raise HTTPException(502, _USER_IMG_ERR)
+
+    results = []
+    for idx, (scene, img_data) in enumerate(zip(selected, image_list)):
+        filename = f"gen_{uuid.uuid4().hex}.jpg"
+        (_user_upload_dir(user_id) / filename).write_bytes(img_data)
+        results.append({"filename": filename, "label": scene.label, "scene_index": indices[idx]})
+    billing.consume_limit(user_id, "image_gen", amount=len(indices))
+    return {"images": results}
 
 
 def _demo_analysis(filename: str, trendyol: TrendyolClient) -> dict:

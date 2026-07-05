@@ -45,7 +45,7 @@ class AttributeFill(BaseModel):
 
 class SceneSpec(BaseModel):
     label: str = Field(description="Sahnenin 2-4 kelimelik Türkçe etiketi, örn: 'Manken üzerinde', 'Elde kullanım'")
-    prompt: str = Field(description="Görsel üretim modeline verilecek ayrıntılı Türkçe sahne tarifi: kompozisyon, ışık, arka plan, insan/el varsa duruşu")
+    prompt: str = Field(description="Görsel üretim modeline verilecek ayrıntılı İngilizce sahne tarifi: kompozisyon, ışık, arka plan, insan/el varsa duruşu")
 
 
 class ScenePlan(BaseModel):
@@ -97,6 +97,11 @@ class SceneRequest(BaseModel):
 class GenerateImageRequest(BaseModel):
     image_filename: str
     scene_index: int
+
+
+class GenerateImagesBatchRequest(BaseModel):
+    image_filename: str
+    scene_indices: Optional[list[int]] = None  # None = henüz üretilmemiş tüm sahneler
 
 
 class PublishResult(BaseModel):

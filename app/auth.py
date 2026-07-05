@@ -152,10 +152,13 @@ def send_verification_email_for_user(user: dict) -> dict:
     if is_email_verified(user):
         return {"ok": True, "already_verified": True}
     if not mail.is_configured():
-        raise HTTPException(
-            503,
-            "E-posta servisi yapılandırılmamış. Yönetici .env dosyasına Resend veya Gmail SMTP ayarlarını eklemeli.",
-        )
+        issues = mail.config_status().get("issues") or []
+        detail = "E-posta servisi yapılandırılmamış."
+        if issues:
+            detail += " " + " ".join(issues)
+        else:
+            detail += " .env dosyasına Resend veya Gmail SMTP ayarlarını ekleyin."
+        raise HTTPException(503, detail)
     code = _create_verification_code(user["id"])
     try:
         return mail.send_verification_code_email(user["email"], code, user.get("full_name") or "")
@@ -248,15 +251,20 @@ class DeleteAccountRequest(BaseModel):
 @router.post("/register")
 def register(req: RegisterRequest, response: Response):
     if not mail.is_configured():
-        raise HTTPException(
-            503,
-            "Kayıt şu an e-posta doğrulaması gerektiriyor ancak mail servisi yapılandırılmamış.",
-        )
+        issues = mail.config_status().get("issues") or []
+        detail = "Kayıt için e-posta servisi düzgün yapılandırılmamış."
+        if issues:
+            detail += " " + " ".join(issues)
+        raise HTTPException(503, detail)
     user = create_user(req.email, req.password, req.full_name, req.company)
+    full = db.query_one("SELECT * FROM users WHERE id=?", (user["id"],))
+    try:
+        send_verification_email_for_user(full)
+    except HTTPException:
+        db.delete_user_cascade(user["id"])
+        raise
     token = create_session(user["id"])
     _set_cookie(response, token)
-    full = db.query_one("SELECT * FROM users WHERE id=?", (user["id"],))
-    send_verification_email_for_user(full)
     return public_user(full)
 
 
