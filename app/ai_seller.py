@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -25,12 +26,44 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
-REVIEWS_FILE = DATA_DIR / "reviews.json"
-INSIGHTS_FILE = DATA_DIR / "insights.json"
-RETURNS_FILE = DATA_DIR / "returns.json"
-SHIPMENTS_FILE = DATA_DIR / "shipments.json"
-LISTING_META_FILE = DATA_DIR / "listing_meta.json"
-SETTINGS_FILE = DATA_DIR / "assistant_settings.json"
+
+# Aktif kullanıcının veri dizini — auth middleware her istekte set eder.
+# Set edilmemişse (testler, eski akış) ortak data/ dizini kullanılır.
+_USER_DIR: ContextVar[Optional[Path]] = ContextVar("assistant_user_dir", default=None)
+
+
+def set_user_dir(path: Optional[Path]) -> None:
+    _USER_DIR.set(path)
+
+
+def _data_dir() -> Path:
+    d = _USER_DIR.get() or DATA_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _reviews_file() -> Path:
+    return _data_dir() / "reviews.json"
+
+
+def _insights_file() -> Path:
+    return _data_dir() / "insights.json"
+
+
+def _returns_file() -> Path:
+    return _data_dir() / "returns.json"
+
+
+def _shipments_file() -> Path:
+    return _data_dir() / "shipments.json"
+
+
+def _listing_meta_file() -> Path:
+    return _data_dir() / "listing_meta.json"
+
+
+def _settings_file() -> Path:
+    return _data_dir() / "assistant_settings.json"
 
 GENERIC_CATEGORIES = frozenset({"diğer", "genel_memnuniyetsizlik"})
 
@@ -270,16 +303,16 @@ _CATEGORY_REPLIES: dict[str, str] = {
 # ---------------------------------------------------------------- Veri katmanı
 
 def load_reviews() -> list[dict]:
-    if REVIEWS_FILE.exists():
-        return json.loads(REVIEWS_FILE.read_text(encoding="utf-8"))
+    if _reviews_file().exists():
+        return json.loads(_reviews_file().read_text(encoding="utf-8"))
     return []
 
 
 def save_reviews(reviews: list[dict]) -> None:
-    REVIEWS_FILE.write_text(json.dumps(reviews, ensure_ascii=False, indent=1), encoding="utf-8")
+    _reviews_file().write_text(json.dumps(reviews, ensure_ascii=False, indent=1), encoding="utf-8")
     # İstatistik değişti — eski analiz geçersiz
-    if INSIGHTS_FILE.exists():
-        INSIGHTS_FILE.unlink()
+    if _insights_file().exists():
+        _insights_file().unlink()
 
 
 def import_reviews_csv(raw: bytes) -> dict:
@@ -317,19 +350,19 @@ def import_reviews_csv(raw: bytes) -> dict:
 
 
 def clear_reviews() -> None:
-    if REVIEWS_FILE.exists():
-        REVIEWS_FILE.unlink()
-    if INSIGHTS_FILE.exists():
-        INSIGHTS_FILE.unlink()
-    if LISTING_META_FILE.exists():
-        LISTING_META_FILE.unlink()
+    if _reviews_file().exists():
+        _reviews_file().unlink()
+    if _insights_file().exists():
+        _insights_file().unlink()
+    if _listing_meta_file().exists():
+        _listing_meta_file().unlink()
 
 
 def load_settings() -> dict:
     default = {"platform": "trendyol", "seller_model": None}
-    if SETTINGS_FILE.exists():
+    if _settings_file().exists():
         try:
-            return {**default, **json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))}
+            return {**default, **json.loads(_settings_file().read_text(encoding="utf-8"))}
         except json.JSONDecodeError:
             pass
     return default
@@ -338,13 +371,13 @@ def load_settings() -> dict:
 def save_settings(data: dict) -> dict:
     current = load_settings()
     current.update({k: v for k, v in data.items() if k in ("platform", "seller_model")})
-    SETTINGS_FILE.write_text(json.dumps(current, ensure_ascii=False, indent=1), encoding="utf-8")
+    _settings_file().write_text(json.dumps(current, ensure_ascii=False, indent=1), encoding="utf-8")
     return current
 
 
 def load_listing_meta() -> dict:
-    if LISTING_META_FILE.exists():
-        return json.loads(LISTING_META_FILE.read_text(encoding="utf-8"))
+    if _listing_meta_file().exists():
+        return json.loads(_listing_meta_file().read_text(encoding="utf-8"))
     return {}
 
 
@@ -361,7 +394,7 @@ def upsert_listing_meta(sku: str, *, image_url: str | None = None, source_url: s
     if product_name:
         entry["product_name"] = product_name
     meta[key] = entry
-    LISTING_META_FILE.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    _listing_meta_file().write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def backfill_missing_listing_images() -> None:
@@ -396,7 +429,7 @@ def backfill_missing_listing_images() -> None:
         except Exception:
             continue
     if changed:
-        LISTING_META_FILE.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+        _listing_meta_file().write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def infer_product_platform(sku: str, source_url: str | None = None) -> str | None:
@@ -478,8 +511,8 @@ def add_scraped_reviews(rows: list[dict], meta: dict | None = None) -> dict:
             source_url=meta.get("source_url"),
             product_name=meta.get("product_name") or (rows[0]["product_name"] if rows else None),
         )
-    if INSIGHTS_FILE.exists():
-        INSIGHTS_FILE.unlink()
+    if _insights_file().exists():
+        _insights_file().unlink()
     return {"added": added, "skipped": 0, "total": len(reviews), "sku": sku}
 
 
@@ -492,20 +525,20 @@ def delete_product(sku: str) -> dict:
     returns_before = len(load_returns())
     returns = [r for r in load_returns() if r.get("sku") != sku]
     returns_deleted = returns_before - len(returns)
-    RETURNS_FILE.write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
+    _returns_file().write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
     meta = load_listing_meta()
     meta.pop(sku.upper(), None)
-    LISTING_META_FILE.write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
-    if INSIGHTS_FILE.exists():
-        INSIGHTS_FILE.unlink()
+    _listing_meta_file().write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    if _insights_file().exists():
+        _insights_file().unlink()
     return {"sku": sku, "reviews_deleted": reviews_deleted, "returns_deleted": returns_deleted}
 
 
 # ------------------------------------------------------------- İade (returns)
 
 def load_returns() -> list[dict]:
-    if RETURNS_FILE.exists():
-        return json.loads(RETURNS_FILE.read_text(encoding="utf-8"))
+    if _returns_file().exists():
+        return json.loads(_returns_file().read_text(encoding="utf-8"))
     return []
 
 
@@ -538,13 +571,13 @@ def import_returns_csv(raw: bytes) -> dict:
         added += 1
     if added == 0:
         raise ValueError("CSV'den hiç iade kaydı okunamadı — dosya formatını kontrol edin.")
-    RETURNS_FILE.write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
+    _returns_file().write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"added": added, "total": len(returns)}
 
 
 def clear_returns() -> None:
-    if RETURNS_FILE.exists():
-        RETURNS_FILE.unlink()
+    if _returns_file().exists():
+        _returns_file().unlink()
 
 
 def compute_returns_stats() -> dict:
@@ -687,8 +720,8 @@ STATUS_LABELS = {"shipped": "Kargoya verildi", "in_transit": "Yolda", "delivered
 
 
 def load_shipments() -> list[dict]:
-    if SHIPMENTS_FILE.exists():
-        return json.loads(SHIPMENTS_FILE.read_text(encoding="utf-8"))
+    if _shipments_file().exists():
+        return json.loads(_shipments_file().read_text(encoding="utf-8"))
     return []
 
 
@@ -734,13 +767,13 @@ def import_shipments_csv(raw: bytes) -> dict:
     if added == 0 and updated == 0:
         raise ValueError("CSV'den hiç kargo kaydı okunamadı — dosya formatını kontrol edin.")
     shipments = list(by_order.values())
-    SHIPMENTS_FILE.write_text(json.dumps(shipments, ensure_ascii=False, indent=1), encoding="utf-8")
+    _shipments_file().write_text(json.dumps(shipments, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"added": added, "updated": updated, "new_deliveries": delivered_new, "total": len(shipments)}
 
 
 def clear_shipments() -> None:
-    if SHIPMENTS_FILE.exists():
-        SHIPMENTS_FILE.unlink()
+    if _shipments_file().exists():
+        _shipments_file().unlink()
 
 
 def compute_shipments_stats(status_filter: Optional[str] = None) -> dict:
@@ -979,8 +1012,8 @@ def generate_store_insights(force: bool = False) -> dict:
     reviews = load_reviews()
     platform = load_settings().get("platform", "trendyol")
     stats = compute_stats(reviews, platform)
-    if not force and INSIGHTS_FILE.exists():
-        cached = json.loads(INSIGHTS_FILE.read_text(encoding="utf-8"))
+    if not force and _insights_file().exists():
+        cached = json.loads(_insights_file().read_text(encoding="utf-8"))
         cached["cached"] = True
         return cached
 
@@ -1038,7 +1071,7 @@ def generate_store_insights(force: bool = False) -> dict:
         "complaint_breakdown": stats["complaint_breakdown"],
     }
     result["cached"] = False
-    INSIGHTS_FILE.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    _insights_file().write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     return result
 
 

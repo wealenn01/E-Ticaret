@@ -33,7 +33,19 @@
       "Bash(curl -s -X POST http://127.0.0.1:8000/api/plan-scenes -H 'Content-Type: application/json' -d '{\"image_filename\":\"../../../etc/passwd\"}')",
       "Bash(python3 -c \"import json,sys; cats=json.load\\(sys.stdin\\); print\\(len\\(cats\\), 'kategori'\\); [print\\(' ', c['name']\\) for c in cats if 'İç Giyim' in c['name']]\")",
       "Bash(chmod +x \"/Users/bedirhan/Desktop/TRENDYOL AGENT/run.sh\")",
-      "Bash(bash -n \"/Users/bedirhan/Desktop/TRENDYOL AGENT/run.sh\")"
+      "Bash(bash -n \"/Users/bedirhan/Desktop/TRENDYOL AGENT/run.sh\")",
+      "Bash(perl -pi -e 's/\\\\bREVIEWS_FILE\\\\b/_reviews_file\\(\\)/g; s/\\\\bINSIGHTS_FILE\\\\b/_insights_file\\(\\)/g; s/\\\\bRETURNS_FILE\\\\b/_returns_file\\(\\)/g; s/\\\\bSHIPMENTS_FILE\\\\b/_shipments_file\\(\\)/g; s/\\\\bLISTING_META_FILE\\\\b/_listing_meta_file\\(\\)/g; s/\\\\bSETTINGS_FILE\\\\b/_settings_file\\(\\)/g' app/ai_seller.py)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('app/ai_seller.py'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(.venv/bin/python -c \"from app import main; print\\('import ok'\\)\")",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"uvicorn app.main:app --port 8017\")",
+      "Bash(rm -rf data/users data/app.db data/app.db-wal data/app.db-shm)",
+      "WebFetch(domain:pazarop.com)",
+      "Bash(perl -pi -e 's/background: #fff\\\\b/background: var\\(--card\\)/g; s/background:#fff\\\\b/background:var\\(--card\\)/g; s/#fbfaff/var\\(--bg\\)/g; s/#faf9ff/var\\(--card2\\)/g; s/#f5f3fb/var\\(--line-soft\\)/g' app/static/panel.html)",
+      "Bash(python3 - app/static/panel.html)",
+      "Bash(grep -c \"background: #fff\\\\|background:#fff\" app/static/assistant.js app/static/assistant-insight.js)",
+      "Bash(perl -pi -e 's/background: #fff;/background: var\\(--card\\);/g; s/background: transparent; padding: 9px; border-radius: 9px;/background: transparent; padding: 9px; border-radius: 9px;/g' app/static/auth.html)",
+      "Bash(perl -pi -e 's/background: #fff;/background: var\\(--card\\);/g; s/background: #fbfaff;/background: var\\(--card2\\);/g; s/border-bottom: 1px solid #f5f3fb;/border-bottom: 1px solid var\\(--line-soft\\);/g; s/\\\\.btn\\\\.ghost \\\\{ background: var\\\\\\(--card\\\\\\); color: var\\\\\\(--ink\\\\\\); border: 1\\\\.5px solid var\\\\\\(--border\\\\\\); \\\\}/.btn.ghost { background: var\\(--card\\); color: var\\(--ink\\); border: 1.5px solid var\\(--border\\); }/' app/static/account.html)"
     ]
   }
 }

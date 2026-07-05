@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrendolAi — Giriş / Kayıt</title>
+<script>
+  (function () {
+    const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = t;
+  })();
+  function toggleTheme() {
+    const h = document.documentElement;
+    h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', h.dataset.theme);
+  }
+</script>
+<style>
+  :root {
+    --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
+    --peach: #f9b17c; --peach-soft: #fdf1e7; --border: #edeaf5;
+    --bg: #ffffff; --card: #ffffff; --card2: #faf9ff;
+    --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
+  }
+  html[data-theme="dark"] {
+    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
+    --peach: #f9b17c; --peach-soft: #38291e; --border: #2d2749;
+    --bg: #131020; --card: #1c1832; --card2: #221d3c;
+    --shadow: 0 2px 8px rgba(0,0,0,.25), 0 14px 44px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: linear-gradient(160deg, var(--bg) 40%, var(--lilac-soft));
+    color: var(--ink); min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  nav { width: 100%; display: flex; align-items: center; padding: 14px 5vw; }
+  .theme-toggle {
+    margin-left: auto; border: 1.5px solid var(--border); background: var(--card);
+    color: var(--ink); border-radius: 999px; width: 36px; height: 36px; cursor: pointer; font-size: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; text-decoration: none; color: var(--ink); }
+  .brand .mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--lilac), var(--peach)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; }
+  .brand em { font-style: normal; color: var(--lilac); }
+  .card {
+    width: min(420px, 92vw); background: var(--card); border: 1px solid var(--border);
+    border-radius: 20px; padding: 34px 30px; box-shadow: var(--shadow); margin: 7vh 0 40px;
+  }
+  h1 { font-size: 22px; letter-spacing: -.5px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 22px; }
+  .tabs { display: flex; background: var(--lilac-soft); border-radius: 12px; padding: 4px; margin-bottom: 22px; }
+  .tabs button {
+    flex: 1; border: 0; background: transparent; padding: 9px; border-radius: 9px;
+    font-weight: 700; font-size: 14px; color: var(--muted); cursor: pointer; transition: all .2s;
+  }
+  .tabs button.on { background: var(--card); color: var(--ink); box-shadow: 0 2px 8px rgba(43,38,64,.08); }
+  label { display: block; font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: 11px;
+    font-size: 14.5px; outline: none; transition: border-color .2s;
+    background: var(--card2); color: var(--ink);
+  }
+  input:focus { border-color: var(--lilac); }
+  .submit {
+    width: 100%; margin-top: 22px; border: 0; cursor: pointer; border-radius: 12px;
+    padding: 13px; font-size: 15px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, var(--lilac), #a58ef8);
+    box-shadow: 0 6px 20px rgba(139,124,246,.35); transition: transform .2s;
+  }
+  .submit:hover { transform: scale(1.02); }
+  .submit:disabled { opacity: .6; cursor: wait; }
+  .err {
+    display: none; background: #fdeaf1; color: #b3305f; border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; margin-top: 16px;
+  }
+  .plan-note {
+    display: none; background: var(--peach-soft); border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; margin-bottom: 6px;
+  }
+  .foot { text-align: center; font-size: 13px; color: var(--muted); margin-top: 18px; }
+  .foot a { color: var(--lilac); font-weight: 700; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="mark">T</span>Trendol<em>Ai</em></a>
+  <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Tema değiştir">🌓</button>
+</nav>
+
+<div class="card">
+  <h1 id="title">Tekrar hoş geldin</h1>
+  <p class="sub" id="subtitle">Hesabına giriş yap ve paneline devam et.</p>
+  <div class="plan-note" id="planNote"></div>
+
+  <div class="tabs">
+    <button id="tabLogin" class="on" onclick="setMode('login')">Giriş Yap</button>
+    <button id="tabRegister" onclick="setMode('register')">Kayıt Ol</button>
+  </div>
+
+  <form id="form">
+    <div id="registerFields" style="display:none">
+      <label>Ad Soyad</label>
+      <input id="f_name" placeholder="Adınız Soyadınız" autocomplete="name">
+      <label>Mağaza / Şirket adı <span style="color:var(--muted);font-weight:400">(isteğe bağlı)</span></label>
+      <input id="f_company" placeholder="Örn: Bedir Home Design">
+    </div>
+    <label>E-posta</label>
+    <input id="f_email" type="email" required placeholder="ornek@mail.com" autocomplete="email">
+    <label>Parola</label>
+    <input id="f_password" type="password" required minlength="8" placeholder="En az 8 karakter" autocomplete="current-password">
+    <button class="submit" id="submitBtn" type="submit">Giriş Yap</button>
+    <div class="err" id="err"></div>
+  </form>
+
+  <p class="foot" id="foot">Hesabın yok mu? <a href="#" onclick="setMode('register');return false">Ücretsiz kayıt ol</a></p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const wantedPlan = params.get('plan');
+const next = params.get('next') || '/panel';
+let mode = params.get('mode') === 'register' || wantedPlan ? 'register' : 'login';
+
+const PLAN_NAMES = { starter: 'Başlangıç', pro: 'Profesyonel', enterprise: 'Kurumsal', free: 'Ücretsiz' };
+if (wantedPlan && PLAN_NAMES[wantedPlan]) {
+  $('planNote').style.display = 'block';
+  $('planNote').textContent = '🎯 Seçtiğin paket: ' + PLAN_NAMES[wantedPlan] +
+    (wantedPlan === 'free' ? ' — kayıttan sonra hemen kullanmaya başlarsın.' : ' — kayıttan sonra ödeme adımına yönlendirileceksin.');
+}
+
+function setMode(m) {
+  mode = m;
+  const login = m === 'login';
+  $('tabLogin').classList.toggle('on', login);
+  $('tabRegister').classList.toggle('on', !login);
+  $('registerFields').style.display = login ? 'none' : 'block';
+  $('title').textContent = login ? 'Tekrar hoş geldin' : 'Hesap oluştur';
+  $('subtitle').textContent = login ? 'Hesabına giriş yap ve paneline devam et.' : 'Ücretsiz planla başla — kredi kartı gerekmez.';
+  $('submitBtn').textContent = login ? 'Giriş Yap' : 'Kayıt Ol';
+  $('foot').innerHTML = login
+    ? 'Hesabın yok mu? <a href="#" onclick="setMode(\'register\');return false">Ücretsiz kayıt ol</a>'
+    : 'Zaten hesabın var mı? <a href="#" onclick="setMode(\'login\');return false">Giriş yap</a>';
+  $('err').style.display = 'none';
+}
+setMode(mode);
+
+// Zaten girişliyse yönlendir
+fetch('/api/auth/me').then(r => { if (r.ok) location.href = afterAuthUrl(); }).catch(() => {});
+
+function afterAuthUrl() {
+  if (wantedPlan && wantedPlan !== 'free') return '/account?checkout=' + encodeURIComponent(wantedPlan);
+  return next;
+}
+
+$('form').onsubmit = async e => {
+  e.preventDefault();
+  $('err').style.display = 'none';
+  $('submitBtn').disabled = true;
+  const body = { email: $('f_email').value.trim(), password: $('f_password').value };
+  if (mode === 'register') { body.full_name = $('f_name').value.trim(); body.company = $('f_company').value.trim(); }
+  try {
+    const r = await fetch('/api/auth/' + mode, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || 'İşlem başarısız (' + r.status + ')');
+    location.href = afterAuthUrl();
+  } catch (err) {
+    $('err').textContent = err.message;
+    $('err').style.display = 'block';
+    $('submitBtn').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

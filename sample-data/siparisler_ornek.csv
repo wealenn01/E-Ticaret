@@ -1,0 +1,23 @@
+order_id,product_name,sku,quantity,unit_price,cost,commission_rate,order_date,city,status,platform
+TY1001,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,2,249.90,95,21.5,2026-06-02,İstanbul,delivered,trendyol
+TY1002,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,1,249.90,95,21.5,2026-06-03,Ankara,delivered,trendyol
+TY1003,Bluetooth Kulaklık ANC Pro,SKU-KULAK-02,1,899.00,520,15,2026-06-03,İzmir,delivered,trendyol
+TY1004,Bluetooth Kulaklık ANC Pro,SKU-KULAK-02,1,899.00,520,15,2026-06-05,İstanbul,returned,trendyol
+TY1005,Pamuklu Oversize T-shirt Siyah,SKU-TSHIRT-03,3,189.90,62,18,2026-06-06,Bursa,delivered,trendyol
+HB2001,Pamuklu Oversize T-shirt Siyah,SKU-TSHIRT-03,1,199.90,62,12,2026-06-07,Antalya,delivered,hepsiburada
+TY1006,Seramik Vazo Mat Bej,SKU-VAZO-04,1,349.00,140,21.5,2026-06-08,İstanbul,delivered,trendyol
+TY1007,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,4,249.90,95,21.5,2026-06-10,İzmir,delivered,trendyol
+TY1008,Yoga Matı 6mm Kaymaz,SKU-YOGA-05,2,329.00,150,17,2026-06-12,Ankara,delivered,trendyol
+TY1009,Bluetooth Kulaklık ANC Pro,SKU-KULAK-02,2,879.00,520,15,2026-06-13,İstanbul,delivered,trendyol
+HB2002,Yoga Matı 6mm Kaymaz,SKU-YOGA-05,1,339.00,150,12,2026-06-14,İzmir,delivered,hepsiburada
+TY1010,Pamuklu Oversize T-shirt Siyah,SKU-TSHIRT-03,2,189.90,62,18,2026-06-15,Adana,delivered,trendyol
+TY1011,Seramik Vazo Mat Bej,SKU-VAZO-04,1,349.00,140,21.5,2026-06-16,İstanbul,canceled,trendyol
+TY1012,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,2,259.90,95,21.5,2026-06-18,Ankara,delivered,trendyol
+TY1013,Yoga Matı 6mm Kaymaz,SKU-YOGA-05,1,329.00,150,17,2026-06-20,İstanbul,delivered,trendyol
+TY1014,Bluetooth Kulaklık ANC Pro,SKU-KULAK-02,1,899.00,520,15,2026-06-22,Gaziantep,delivered,trendyol
+TY1015,Pamuklu Oversize T-shirt Siyah,SKU-TSHIRT-03,1,189.90,62,18,2026-06-24,İzmir,returned,trendyol
+TY1016,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,3,259.90,95,21.5,2026-06-26,İstanbul,delivered,trendyol
+HB2003,Seramik Vazo Mat Bej,SKU-VAZO-04,2,359.00,140,12,2026-06-27,Ankara,delivered,hepsiburada
+TY1017,Yoga Matı 6mm Kaymaz,SKU-YOGA-05,3,329.00,150,17,2026-06-29,İstanbul,delivered,trendyol
+TY1018,Bluetooth Kulaklık ANC Pro,SKU-KULAK-02,1,919.00,520,15,2026-07-01,Bursa,delivered,trendyol
+TY1019,El Yapımı Seramik Kupa 300ml,SKU-KUPA-01,2,259.90,95,21.5,2026-07-02,İzmir,delivered,trendyol

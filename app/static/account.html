@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrendolAi — Hesabım</title>
+<script>
+  (function () {
+    const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = t;
+  })();
+  function toggleTheme() {
+    const h = document.documentElement;
+    h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', h.dataset.theme);
+  }
+</script>
+<style>
+  :root {
+    --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
+    --peach: #f9b17c; --peach-soft: #fdf1e7; --sky-soft: #eaf4fd; --rose-soft: #fdeaf1;
+    --border: #edeaf5; --ok: #2f9e6e;
+    --bg: #fbfaff; --card: #ffffff; --card2: #faf9ff; --line-soft: #f5f3fb;
+    --navbg: rgba(255,255,255,.9);
+    --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
+  }
+  html[data-theme="dark"] {
+    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
+    --peach: #f9b17c; --peach-soft: #38291e; --sky-soft: #1c2a3a; --rose-soft: #35202c;
+    --border: #2d2749; --ok: #4ec78f;
+    --bg: #131020; --card: #1c1832; --card2: #221d3c; --line-soft: #262041;
+    --navbg: rgba(19,16,32,.9);
+    --shadow: 0 2px 8px rgba(0,0,0,.25), 0 14px 44px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; }
+  nav {
+    position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 18px;
+    padding: 13px 4vw; background: var(--navbg); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; text-decoration: none; color: var(--ink); }
+  .brand .mark { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, var(--lilac), var(--peach)); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; }
+  .brand em { font-style: normal; color: var(--lilac); }
+  nav .sp { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .btn {
+    display: inline-block; border: 0; cursor: pointer; text-decoration: none; text-align: center;
+    border-radius: 11px; font-weight: 700; font-size: 13.5px; padding: 9px 18px; transition: transform .2s, box-shadow .2s;
+  }
+  .btn:hover { transform: scale(1.04); }
+  .btn.primary { background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; box-shadow: 0 5px 16px rgba(139,124,246,.32); }
+  .btn.ghost { background: var(--card); color: var(--ink); border: 1.5px solid var(--border); }
+  .btn.danger { background: var(--card); color: #c0355f; border: 1.5px solid #f3cede; }
+  .btn.sm { padding: 6px 13px; font-size: 12.5px; border-radius: 9px; }
+  .btn:disabled { opacity: .55; cursor: default; transform: none !important; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 34px 4vw 80px; }
+  h1 { font-size: 26px; letter-spacing: -.6px; margin-bottom: 4px; }
+  .lead { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 26px 24px; box-shadow: var(--shadow); margin-bottom: 22px; }
+  .card h2 { font-size: 17px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  /* mevcut plan */
+  .planbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .planname { font-size: 21px; font-weight: 800; }
+  .pill { border-radius: 999px; padding: 4px 13px; font-size: 12px; font-weight: 700; background: var(--lilac-soft); color: var(--lilac); }
+  .pill.warn { background: var(--peach-soft); color: #c07a33; }
+  .usage { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .u { background: var(--card2); border: 1px solid var(--border); border-radius: 13px; padding: 12px 14px; }
+  .u .lbl { font-size: 12px; font-weight: 700; color: var(--muted); }
+  .u .val { font-size: 15px; font-weight: 800; margin: 2px 0 7px; }
+  .bar { height: 7px; border-radius: 99px; background: var(--lilac-soft); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--lilac), var(--peach)); }
+  /* plan grid */
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+  .plan { border: 1.5px solid var(--border); border-radius: 15px; padding: 20px 17px; display: flex; flex-direction: column; background: var(--card); position: relative; }
+  .plan.hot { border-color: var(--lilac); }
+  .plan.hot::before { content: "En popüler"; position: absolute; top: -11px; left: 14px; background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; font-size: 10.5px; font-weight: 700; padding: 3px 12px; border-radius: 999px; }
+  .plan h3 { font-size: 14.5px; }
+  .plan .price { font-size: 25px; font-weight: 800; margin: 6px 0 0; }
+  .plan .per { font-size: 11.5px; color: var(--muted); margin-bottom: 12px; }
+  .plan ul { list-style: none; flex: 1; margin-bottom: 14px; }
+  .plan li { font-size: 12.3px; color: var(--muted); padding: 3.5px 0; display: flex; gap: 6px; }
+  .plan li::before { content: "✓"; color: var(--lilac); font-weight: 800; }
+  /* bağlantılar */
+  .conn { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; flex-wrap: wrap; }
+  .conn .logo { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; color: #fff; }
+  .conn .nm { font-weight: 800; font-size: 14.5px; }
+  .conn .st { font-size: 12px; font-weight: 700; }
+  .st.active { color: var(--ok); } .st.error { color: #c0355f; } .st.unverified { color: #c07a33; }
+  .conn .acts { margin-left: auto; display: flex; gap: 8px; }
+  label { display: block; font-size: 12.5px; font-weight: 700; margin: 12px 0 5px; }
+  input, select { width: 100%; padding: 10px 13px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; background: var(--card2); color: var(--ink); }
+  input:focus, select:focus { border-color: var(--lilac); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid var(--line-soft); }
+  /* modal */
+  .overlay { position: fixed; inset: 0; background: rgba(43,38,64,.4); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 100; padding: 4vw; }
+  .overlay.on { display: flex; }
+  .modal { width: min(430px, 94vw); background: var(--card); border-radius: 20px; padding: 28px 26px; box-shadow: 0 24px 80px rgba(43,38,64,.3); max-height: 90vh; overflow: auto; }
+  .modal h2 { font-size: 18px; margin-bottom: 4px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .note { background: var(--sky-soft); border-radius: 10px; padding: 10px 13px; font-size: 12.5px; margin-top: 14px; }
+  .err { display: none; background: var(--rose-soft); color: #b3305f; border-radius: 10px; padding: 10px 13px; font-size: 13px; margin-top: 12px; }
+  #toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 10px; z-index: 200; }
+  .toast { background: #2b2640; color: #fff; border-radius: 12px; padding: 12px 18px; font-size: 13.5px; box-shadow: 0 10px 30px rgba(43,38,64,.35); max-width: 340px; }
+  .toast.ok { background: #226649; }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="brand"><span class="mark">T</span>Trendol<em>Ai</em></a>
+  <div class="sp">
+    <button class="btn ghost" onclick="toggleTheme()" title="Tema değiştir">🌓</button>
+    <a class="btn ghost" href="/panel">← Panele Dön</a>
+    <button class="btn ghost" onclick="logout()">Çıkış</button>
+  </div>
+</nav>
+
+<div class="wrap">
+  <h1 id="hello">Hesabım</h1>
+  <p class="lead" id="helloSub">Aboneliğini, pazaryeri bağlantılarını ve faturalarını buradan yönet.</p>
+
+  <div class="card" id="subCard">
+    <h2>💳 Aboneliğin</h2>
+    <div class="planbar">
+      <span class="planname" id="curPlanName">—</span>
+      <span class="pill" id="curPlanPill">yükleniyor…</span>
+      <span class="muted" id="renewInfo"></span>
+      <span style="margin-left:auto"><button class="btn danger sm" id="cancelBtn" style="display:none" onclick="cancelSub()">Aboneliği İptal Et</button></span>
+    </div>
+    <div class="usage" id="usage"></div>
+  </div>
+
+  <div class="card">
+    <h2>📦 Paketler</h2>
+    <p class="muted" style="margin-bottom:16px">Dilediğin zaman paket değiştirebilirsin — yükseltme anında aktif olur.</p>
+    <div class="plans" id="planGrid"></div>
+  </div>
+
+  <div class="card">
+    <h2>🔗 Pazaryeri Bağlantıları</h2>
+    <p class="muted" style="margin-bottom:14px">Mağazanı bağla — Trendyol API ile canlı doğrulanır; diğer platformlarda yorum çekme ve CSV analizi hemen çalışır.</p>
+    <div id="connList"></div>
+    <button class="btn primary" onclick="openConnModal()">+ Mağaza Bağla</button>
+  </div>
+
+  <div class="card">
+    <h2>🧾 Ödeme Geçmişi</h2>
+    <div id="invoiceWrap"><p class="muted">Henüz ödeme yok.</p></div>
+  </div>
+</div>
+
+<!-- Ödeme modalı -->
+<div class="overlay" id="payOverlay">
+  <div class="modal">
+    <h2 id="payTitle">Pakete Geç</h2>
+    <p class="muted" id="paySub"></p>
+    <label>Kart üzerindeki isim</label>
+    <input id="c_holder" placeholder="AD SOYAD">
+    <label>Kart numarası</label>
+    <input id="c_number" placeholder="4242 4242 4242 4242" inputmode="numeric" maxlength="23">
+    <div class="row2">
+      <div><label>Son kullanma (AA/YY)</label><input id="c_exp" placeholder="12/28" maxlength="5"></div>
+      <div><label>CVC</label><input id="c_cvc" placeholder="123" maxlength="4" inputmode="numeric"></div>
+    </div>
+    <div class="note">🔒 Demo ödeme modu: kart doğrulanır ama gerçek para çekilmez. Canlıya geçerken iyzico/Stripe anahtarı bağlanır. Test kartı: 4242 4242 4242 4242</div>
+    <div class="err" id="payErr"></div>
+    <div style="display:flex; gap:10px; margin-top:18px">
+      <button class="btn primary" style="flex:1" id="payBtn" onclick="doCheckout()">Ödemeyi Tamamla</button>
+      <button class="btn ghost" onclick="closePay()">Vazgeç</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bağlantı modalı -->
+<div class="overlay" id="connOverlay">
+  <div class="modal">
+    <h2 id="connTitle">Mağaza Bağla</h2>
+    <p class="muted">Platformu seç ve entegrasyon bilgilerini gir.</p>
+    <label>Platform</label>
+    <select id="connPlatform" onchange="renderConnFields()"></select>
+    <label>Mağaza etiketi <span style="font-weight:400;color:var(--muted)">(isteğe bağlı)</span></label>
+    <input id="connLabel" placeholder="Örn: Ana mağazam">
+    <div id="connFields"></div>
+    <div class="err" id="connErr"></div>
+    <div style="display:flex; gap:10px; margin-top:18px">
+      <button class="btn primary" style="flex:1" id="connSaveBtn" onclick="saveConn()">Kaydet ve Doğrula</button>
+      <button class="btn ghost" onclick="$('connOverlay').classList.remove('on')">Vazgeç</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+function toast(msg, ok = false) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (ok ? ' ok' : '');
+  t.textContent = msg;
+  $('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 7000);
+}
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (r.status === 401) { location.href = '/auth?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('Oturum gerekli'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || 'İstek başarısız (' + r.status + ')');
+  return data;
+}
+async function logout() { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/'; }
+
+const METRICS = {
+  ai_listing: 'AI ürün ilanı', review_scrape: 'Yorum çekme', insight: 'AI içgörü',
+  image_gen: 'Satış görseli', stores: 'Mağaza bağlantısı', ai_answer: 'AI soru cevabı',
+};
+const PLATFORM_COLORS = { trendyol: '#f27a1a', hepsiburada: '#ff6000', n11: '#5d3ebc', amazon: '#232f3e' };
+
+let me = null, plansData = null, platforms = [], editingConnId = null, checkoutPlan = null;
+
+async function load() {
+  me = await api('/api/auth/me');
+  $('hello').textContent = 'Merhaba' + (me.full_name ? ', ' + me.full_name.split(' ')[0] : '') + ' 👋';
+  $('helloSub').textContent = me.email + (me.company ? ' · ' + me.company : '') + ' — aboneliğini, bağlantılarını ve faturalarını buradan yönet.';
+  await Promise.all([loadSub(), loadPlans(), loadConns(), loadInvoices()]);
+  const want = new URLSearchParams(location.search).get('checkout');
+  if (want && want !== me.plan) openPay(want);
+}
+
+async function loadSub() {
+  const s = await api('/api/billing/subscription');
+  $('curPlanName').textContent = s.plan.name;
+  const sub = s.subscription;
+  $('curPlanPill').textContent = s.plan.price > 0 ? '₺' + s.plan.price + '/ay' : 'ücretsiz';
+  $('cancelBtn').style.display = (sub.plan !== 'free' && sub.status === 'active') ? '' : 'none';
+  if (sub.status === 'canceled') {
+    $('curPlanPill').className = 'pill warn';
+    $('curPlanPill').textContent = 'iptal edildi';
+  }
+  $('renewInfo').textContent = sub.renews_at
+    ? (sub.status === 'canceled' ? 'Şu tarihe kadar aktif: ' : 'Yenileme: ') + new Date(sub.renews_at * 1000).toLocaleDateString('tr-TR')
+    : '';
+  const u = s.usage || {};
+  $('usage').innerHTML = Object.entries(s.limits).map(([k, lim]) => {
+    const used = u[k] || 0;
+    const pct = lim === -1 ? 0 : Math.min(100, Math.round(used / lim * 100));
+    return '<div class="u"><div class="lbl">' + (METRICS[k] || k) + '</div>' +
+      '<div class="val">' + used + ' / ' + (lim === -1 ? '∞' : lim) + '</div>' +
+      '<div class="bar"><i style="width:' + (lim === -1 ? 4 : pct) + '%"></i></div></div>';
+  }).join('');
+}
+
+async function loadPlans() {
+  plansData = await api('/api/billing/plans');
+  $('planGrid').innerHTML = plansData.plans.map(p => {
+    const cur = me.plan === p.key;
+    return '<div class="plan' + (p.popular ? ' hot' : '') + '">' +
+      '<h3>' + p.name + '</h3>' +
+      '<div class="price">' + (p.price ? '₺' + p.price : 'Ücretsiz') + '</div>' +
+      '<div class="per">' + (p.price ? 'aylık' : p.tagline) + '</div>' +
+      '<ul>' + p.bullets.map(b => '<li>' + b + '</li>').join('') + '</ul>' +
+      (cur
+        ? '<button class="btn ghost" disabled>Mevcut paketin</button>'
+        : '<button class="btn ' + (p.popular ? 'primary' : 'ghost') + '" onclick="openPay(\'' + p.key + '\')">' +
+          (p.price ? 'Bu Pakete Geç' : 'Ücretsize Dön') + '</button>') +
+      '</div>';
+  }).join('');
+}
+
+function openPay(planKey) {
+  const p = plansData.plans.find(x => x.key === planKey);
+  if (!p) return;
+  checkoutPlan = planKey;
+  if (planKey === 'free') { doCheckout(); return; }
+  $('payTitle').textContent = p.name + ' paketine geç';
+  $('paySub').textContent = '₺' + p.price + '/ay — ' + p.tagline;
+  $('payErr').style.display = 'none';
+  $('payOverlay').classList.add('on');
+}
+function closePay() { $('payOverlay').classList.remove('on'); }
+
+$('c_number').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/[^\d]/g, '').slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
+});
+$('c_exp').addEventListener('input', e => {
+  let v = e.target.value.replace(/[^\d]/g, '').slice(0, 4);
+  e.target.value = v.length > 2 ? v.slice(0, 2) + '/' + v.slice(2) : v;
+});
+
+async function doCheckout() {
+  const body = { plan: checkoutPlan };
+  if (checkoutPlan !== 'free') {
+    const [mm, yy] = $('c_exp').value.split('/');
+    body.card = {
+      number: $('c_number').value, holder: $('c_holder').value,
+      exp_month: parseInt(mm || '0', 10), exp_year: 2000 + parseInt(yy || '0', 10),
+      cvc: $('c_cvc').value,
+    };
+  }
+  $('payBtn') && ($('payBtn').disabled = true);
+  try {
+    const r = await api('/api/billing/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    closePay();
+    toast(r.message, true);
+    me = await api('/api/auth/me');
+    history.replaceState(null, '', '/account');
+    await Promise.all([loadSub(), loadPlans(), loadInvoices()]);
+  } catch (e) {
+    if ($('payOverlay').classList.contains('on')) { $('payErr').textContent = e.message; $('payErr').style.display = 'block'; }
+    else toast(e.message);
+  } finally { $('payBtn').disabled = false; }
+}
+
+async function cancelSub() {
+  if (!confirm('Aboneliği iptal etmek istediğine emin misin? Dönem sonuna kadar paketin aktif kalır.')) return;
+  try { const r = await api('/api/billing/cancel', { method: 'POST' }); toast(r.message, true); await loadSub(); }
+  catch (e) { toast(e.message); }
+}
+
+// ---- bağlantılar ----
+async function loadConns() {
+  const [conns, plats] = await Promise.all([api('/api/connections'), platforms.length ? platforms : api('/api/connections/platforms')]);
+  platforms = plats;
+  $('connList').innerHTML = conns.length ? conns.map(c => {
+    const stTxt = { active: '● bağlı', error: '● hata', unverified: '● doğrulanmadı' }[c.status] || c.status;
+    return '<div class="conn">' +
+      '<div class="logo" style="background:' + (PLATFORM_COLORS[c.platform] || '#8b7cf6') + '">' + c.platform_name[0] + '</div>' +
+      '<div><div class="nm">' + c.platform_name + (c.label ? ' · ' + c.label : '') + '</div>' +
+      '<div class="st ' + c.status + '">' + stTxt + '</div>' +
+      '<div class="muted" style="font-size:11.5px">' + c.capabilities.join(' · ') + '</div></div>' +
+      '<div class="acts">' +
+      '<button class="btn ghost sm" onclick="testConn(\'' + c.id + '\')">Test Et</button>' +
+      '<button class="btn ghost sm" onclick="openConnModal(\'' + c.id + '\')">Düzenle</button>' +
+      '<button class="btn danger sm" onclick="delConn(\'' + c.id + '\')">Sil</button>' +
+      '</div></div>';
+  }).join('') : '<p class="muted" style="margin-bottom:12px">Henüz bağlı mağaza yok.</p>';
+  window._conns = conns;
+}
+
+function openConnModal(id) {
+  editingConnId = id || null;
+  $('connErr').style.display = 'none';
+  $('connTitle').textContent = id ? 'Bağlantıyı Düzenle' : 'Mağaza Bağla';
+  const cur = id ? window._conns.find(c => c.id === id) : null;
+  $('connPlatform').innerHTML = platforms.map(p =>
+    '<option value="' + p.key + '"' + (cur && cur.platform === p.key ? ' selected' : '') + '>' + p.name + '</option>').join('');
+  $('connPlatform').disabled = !!id;
+  $('connLabel').value = cur ? cur.label : '';
+  renderConnFields(cur);
+  $('connOverlay').classList.add('on');
+}
+
+function renderConnFields(cur) {
+  const key = $('connPlatform').value;
+  const p = platforms.find(x => x.key === key);
+  cur = cur && cur.platform === key ? cur : (editingConnId ? window._conns.find(c => c.id === editingConnId) : null);
+  $('connFields').innerHTML = p.fields.map(f =>
+    '<label>' + f.label + (f.required ? '' : ' <span style="font-weight:400;color:var(--muted)">(isteğe bağlı)</span>') + '</label>' +
+    '<input data-credkey="' + f.key + '" value="' + ((cur && cur.credentials[f.key]) || '') + '"' +
+    (f.key === 'env' ? ' placeholder="prod"' : '') + '>').join('');
+}
+
+async function saveConn() {
+  const creds = {};
+  document.querySelectorAll('#connFields input').forEach(i => { creds[i.dataset.credkey] = i.value.trim(); });
+  const body = { platform: $('connPlatform').value, label: $('connLabel').value, credentials: creds };
+  $('connSaveBtn').disabled = true;
+  try {
+    const r = await api(editingConnId ? '/api/connections/' + editingConnId : '/api/connections', {
+      method: editingConnId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    $('connOverlay').classList.remove('on');
+    toast(r.message, r.connection.status === 'active');
+    await loadConns();
+  } catch (e) { $('connErr').textContent = e.message; $('connErr').style.display = 'block'; }
+  finally { $('connSaveBtn').disabled = false; }
+}
+
+async function testConn(id) {
+  try { const r = await api('/api/connections/' + id + '/test', { method: 'POST' }); toast(r.message, r.status === 'active'); await loadConns(); }
+  catch (e) { toast(e.message); }
+}
+async function delConn(id) {
+  if (!confirm('Bu mağaza bağlantısını silmek istediğine emin misin?')) return;
+  try { await api('/api/connections/' + id, { method: 'DELETE' }); toast('Bağlantı silindi.', true); await loadConns(); }
+  catch (e) { toast(e.message); }
+}
+
+async function loadInvoices() {
+  const inv = await api('/api/billing/invoices');
+  if (!inv.length) return;
+  $('invoiceWrap').innerHTML = '<table><tr><th>Tarih</th><th>Paket</th><th>Tutar</th><th>Kart</th><th>Durum</th></tr>' +
+    inv.map(i => '<tr><td>' + new Date(i.created_at * 1000).toLocaleDateString('tr-TR') + '</td>' +
+      '<td>' + i.plan_name + '</td><td>₺' + i.amount + '</td>' +
+      '<td>**** ' + i.card_last4 + '</td><td>' + (i.status === 'paid' ? '✅ ödendi' : i.status) +
+      (i.provider === 'demo' ? ' <span class="muted">(demo)</span>' : '') + '</td></tr>').join('') + '</table>';
+}
+
+load().catch(e => toast(e.message));
+</script>
+</body>
+</html>

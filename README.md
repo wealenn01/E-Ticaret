@@ -1,89 +1,109 @@
-# 🛒 Trendyol Listeleme Agent'ı
+# 🛒 TrendolAi — Çoklu Pazaryeri E-Ticaret SaaS Paneli
 
-Ürün fotoğrafını yükle → yapay zeka (Google Gemini, **ücretsiz API**) fotoğrafı analiz etsin,
-başlık/açıklama/özellikleri yazsın, web'den (DuckDuckGo) fiyat araştırması yapsın, Trendyol
-kategorisini eşleştirsin → sen kontrol edip onayla → ürün Trendyol Marketplace API ile
-pazaryerine gönderilsin.
+Üyelik sistemli, paket satın alınabilen, yapay zeka destekli pazaryeri satış asistanı.
+Satıcılar hesap açar, paket seçer, mağazalarını bağlar ve sidebar'lı tek panelden yönetir:
 
-## Akış
+**Operasyon modülleri** (`/api/mp/*` — tüm platformlardan normalize veri):
+- **Sipariş yönetimi**: tüm pazaryerlerinden paketler tek listede, kargo takibiyle
+- **Ürün & stok yönetimi**: panelden fiyat/stok güncelle → API ile mağazaya işlenir; **düşük stok alarmı** (eşik ayarlanabilir)
+- **Müşteri soruları**: bekleyen sorular tek listede, **AI cevap önerisi** + tek tıkla gönderim
+- **İade & tazmin**: talepleri onayla / itiraz et
+- **Finans modülü**: hakediş, komisyon, kesinti, net kazanç (platform bazında)
+- **Buybox Tracker**: rakip fiyat takibi + **AI dinamik fiyatlandırma** önerisi
+- **Webhook yönetimi**: yeni sipariş bildirimlerini kendi sistemine ilet (Trendyol)
 
-```
-Fotoğraf → [1. Görsel analiz] → [2. Fiyat araştırması (web search)]
-        → [3. Kategori eşleştirme] → [4. Özellik doldurma]
-        → Taslak (sen düzenler/onaylarsın) → Trendyol createProducts V2 → Batch takibi
-```
+**AI araçları**:
+- **AI hızlı ürün ekleme**: fotoğraf → başlık/açıklama/kategori/özellik/fiyat → Trendyol'a gönder
+- **AI satış görselleri**: mankenli / kullanım senaryolu 4 profesyonel görsel
+- **Yorum analizi**: CSV veya ürün linkinden yorum çekme, şikayet kırılımı, AI içgörüleri, cevap önerileri
+- **Satış & kârlılık analitiği**: ciro, net kâr, marj, şehir/platform kırılımı, AI aksiyon önerileri
+
+Arayüz: pazarop tarzı tanıtım sayfası, sidebar'lı dashboard, **dark mode** (tüm sayfalarda, kalıcı).
+
+## Pazaryeri entegrasyonları (app/marketplace_api/)
+
+| Platform | Gerçek API kapsamı |
+|---|---|
+| **Trendyol** | Ürünler, fiyat/stok, siparişler, iadeler (onay/itiraz), soru-cevap, hakediş, webhook — Satıcı API v2 |
+| **Hepsiburada** | Listing (fiyat/stok) + OMS (sipariş/paket) |
+| **N11** | REST: ürünler, fiyat/stok, siparişler |
+| **Amazon TR** | SP-API + LWA: siparişler, fiyat/stok (Listings), finans (Finances), buybox (Product Pricing) |
+
+Anahtar girilmeyen bağlantılar **DEMO modda** çalışır: panel gerçekçi örnek veriyle tam
+fonksiyoneldir, yazma işlemleri simüle edilir. Anahtarlar girildiği anda aynı ekranlar
+gerçek mağaza verisiyle çalışır.
 
 ## Kurulum
 
-Tek komut (sanal ortamı kurar, bağımlılıkları yükler, sunucuyu başlatır):
-
 ```bash
 cd "TRENDYOL AGENT"
-./run.sh            # veya farklı port: ./run.sh 8080
+./run.sh            # sanal ortamı kurar, bağımlılıkları yükler, sunucuyu başlatır
 ```
 
-Elle kurmak istersen:
+Tarayıcıda **http://127.0.0.1:8000** aç → "Ücretsiz Hesap Aç" ile kayıt ol.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # GEMINI_API_KEY'i doldur (https://aistudio.google.com — ücretsiz)
-uvicorn app.main:app --reload
-```
+`.env` içine `GEMINI_API_KEY` eklemek AI özelliklerini canlıya alır
+(https://aistudio.google.com — ücretsiz). Anahtar yokken AI akışları demo modda çalışır.
 
-Sonra tarayıcıda **http://127.0.0.1:8000** aç.
+## SaaS mimarisi
 
-## Modlar
+| Katman | Ne yapar |
+|---|---|
+| **Üyelik** | E-posta + parola kayıt/giriş (PBKDF2), httpOnly çerezle 30 günlük oturum |
+| **Paketler** | Ücretsiz ₺0 / Başlangıç ₺299 / Profesyonel ₺699 / Kurumsal ₺1999 (aylık) |
+| **Limitler** | AI ilan, yorum çekme, içgörü, görsel üretimi ve mağaza sayısı paket bazlı sayaçla takip edilir (aylık sıfırlanır) |
+| **Ödeme** | `PAYMENT_PROVIDER=demo` (varsayılan): kart Luhn kontrolünden geçer, gerçek para çekilmez. Canlıda iyzico/Stripe `app/billing.py → _charge_card` fonksiyonuna bağlanır |
+| **Veri izolasyonu** | Her kullanıcının verisi `data/users/<id>/` altında ayrı tutulur; hesap/abonelik/bağlantılar SQLite'ta (`data/app.db`) |
+| **Bağlantılar** | Kullanıcı başına pazaryeri hesapları; Trendyol anahtarları kategori API'siyle canlı doğrulanır |
 
-| Mod | Ne zaman | Davranış |
-|---|---|---|
-| **DEMO (mock)** | `.env`'de Trendyol anahtarları boşsa | Tüm AI akışı gerçek çalışır; kategori listesi örnek veridir, "yayınla" adımı simüle edilir. |
-| **stage** | `TRENDYOL_ENV=stage` + anahtarlar dolu | Trendyol test ortamına (stageapigw) gönderir. |
-| **prod** | `TRENDYOL_ENV=prod` | Gerçek pazaryerine gönderir. Ürün, Trendyol onay sürecinden sonra yayına girer. |
+## Sayfalar
 
-## Gerçek moda geçiş — kontrol listesi
+- `/` — pazarop tarzı tanıtım: hero + animasyonlu sayaçlar, "Her Şey Tek Panelde", "AI Süper Güçleri", öne çıkanlar, 3 adım, fiyatlandırma, SSS
+- `/auth` — giriş / kayıt
+- `/account` — abonelik & kullanım, paket değiştirme (checkout), pazaryeri bağlantıları, fatura geçmişi
+- `/panel` — sidebar'lı dashboard: Genel Bakış · Siparişler · Ürünler & Stok · Sorular · İade & Tazmin · Finans · AI Ürün Ekleme · Buybox & Fiyat · Yorum Analizi · Satış Analizi
 
-1. **Trendyol satıcı hesabı** aç ve onaylat.
-2. Satıcı Paneli → **Hesap Bilgileri → Entegrasyon Bilgileri**'nden `Satıcı ID`, `API Key`, `API Secret` al, `.env`'e yaz.
-3. **Görsel hosting:** Trendyol görselleri herkese açık HTTPS URL olarak ister (1200×1800 px önerilir).
-   En kolayı: [imgbb.com](https://api.imgbb.com) ücretsiz API anahtarı alıp `IMGBB_API_KEY`'e yazmak.
-   Kendi S3/CDN'in varsa `app/main.py` içindeki `_host_image` fonksiyonunu değiştir.
-4. **Marka:** Gönderdiğin marka adının Trendyol marka listesinde kayıtlı olması gerekir
-   (kendi markan varsa panelden marka başvurusu yap).
-5. Önce `TRENDYOL_ENV=stage` ile test et, sonra `prod`'a geç.
+## Trendyol'da canlıya geçiş
 
-## Satış görseli üretimi
+1. Satıcı Paneli → **Hesap Bilgileri → Entegrasyon Bilgileri**'nden `Satıcı ID`, `API Key`, `API Secret` al.
+2. Panelde **Hesabım → Mağaza Bağla → Trendyol**'a gir — bağlantı otomatik doğrulanır.
+3. Görsel hosting için `.env`'e `IMGBB_API_KEY` ekle (Trendyol herkese açık HTTPS URL ister).
+4. Marka adının Trendyol marka listesinde kayıtlı olması gerekir.
 
-Taslak ekranındaki **"🎨 4 Satış Görseli Oluştur"** butonu, ürün tipine göre 4 sahne planlar
-(giyilebilir ürün → manken üzerinde, elde kullanılan ürün → elde kullanım, büyük ürün → yaşam
-alanında vb.) ve Gemini görsel modeliyle (`gemini-2.5-flash-image`) üretir. Beğendiklerini
-işaretlersen ilana ek görsel olarak gönderilir; beğenmediklerini tek tek yeniden üretebilirsin.
-Görsel modeli ücretsiz katmanda sınırlı kotaya sahiptir; kota dolarsa hata mesajı gösterilir.
+`.env`'deki `TRENDYOL_*` anahtarları hâlâ desteklenir (tek kiracılı kullanım için yedek);
+kullanıcının kendi bağlantısı varsa o önceliklidir.
 
-Kategori yanlış seçildiyse taslak ekranındaki kategori kutusuna yazarak arayıp değiştirebilirsin —
-özellikler yeni kategoriye göre otomatik yeniden doldurulur.
+## CSV formatları (örnekler `sample-data/` içinde)
 
-## Bilinmesi gerekenler
-
-- Ürün gönderimi asenkron çalışır: API bir `batchRequestId` döner, agent durumu birkaç kez
-  yoklar ve `failureReasons` hatalarını arayüzde gösterir.
-- Trendyol'a giden her ürün, Trendyol'un kendi **onay sürecinden** geçer — API "başarılı" dese
-  bile yayına girmesi zaman alabilir.
-- Fiyat önerisi web aramasına (DuckDuckGo) dayalı bir **tahmindir**; onay ekranında her zaman kontrol et.
-- Gemini ücretsiz katman limitleri: ~10 istek/dk, 1500 istek/gün (fotoğraf başına 4 çağrı yapılır).
-  Ücretsiz katmanda gönderilen veriler Google tarafından model geliştirmede kullanılabilir.
-- Trendyol Product V1 API 10 Ağustos 2026'da kapanıyor; bu proje **V2** kullanır.
+- **Yorumlar**: `product_name,sku,rating,comment_text,review_date`
+- **Siparişler**: `order_id,product_name,sku,quantity,unit_price,cost,commission_rate,order_date,city,status,platform`
+- **İadeler**: `product_name,sku,return_reason,return_date,quantity`
+- **Kargolar**: `order_id,product_name,sku,carrier,tracking_number,status,shipped_date,delivered_date`
 
 ## Proje yapısı
 
 ```
 app/
-  main.py             FastAPI uygulaması (analyze / publish uçları)
+  main.py             FastAPI uygulaması, auth middleware, listeleme/asistan uçları
+  auth.py             Kayıt/giriş/oturum (/api/auth/*)
+  billing.py          Paketler, limitler, checkout, faturalar (/api/billing/*)
+  marketplaces.py     Pazaryeri bağlantıları (/api/connections/*)
+  ops.py              Operasyon merkezi: sipariş/ürün/soru/iade/finans/buybox/webhook (/api/mp/*)
+  analytics.py        Satış & kârlılık analitiği (/api/analytics/*)
+  marketplace_api/    Platform istemcileri: trendyol_api, hepsiburada_api, n11_api, amazon_api (+demo veri)
+  db.py               SQLite katmanı (users, sessions, subscriptions, payments, connections, usage)
   ai_agent.py         Gemini çağrıları: görsel analiz, fiyat, kategori, özellik
-  trendyol_client.py  Trendyol Marketplace API istemcisi (mock/stage/prod)
-  models.py           Pydantic şemaları
-  static/index.html   Web arayüzü
-uploads/              Yüklenen fotoğraflar
+  ai_seller.py        Mağaza asistanı (yorum/iade/kargo analizi) — kullanıcı başına veri
+  trendyol_client.py  Trendyol ürün oluşturma istemcisi (AI ilan akışı)
+  review_scraper.py   Ürün linkinden yorum çekme
+  static/             index (landing) · auth · account · panel — hepsi dark mode destekli
+data/
+  app.db              Hesap/abonelik/bağlantı veritabanı (git'e girmez)
+  users/<id>/         Kullanıcı başına yorum/sipariş/iade/kargo/buybox verileri (git'e girmez)
 ```
-# trendyol_ai_panel
-# trendyol_ai_panel
+
+## Bilinmesi gerekenler
+
+- Gemini ücretsiz katman limitleri: ~10 istek/dk — yoğun kullanımda `GEMINI_MODEL=gemini-2.5-flash-lite` daha yüksek kotalıdır.
+- Trendyol ürün gönderimi asenkrondur; batch durumu panelde gösterilir ve ürün Trendyol onayından sonra yayına girer.
+- Demo ödeme test kartı: `4242 4242 4242 4242` (herhangi bir gelecek tarih + CVC).

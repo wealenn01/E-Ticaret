@@ -19,6 +19,12 @@ load_dotenv()
 
 from . import ai_agent  # noqa: E402  (load_dotenv önce çalışmalı)
 from . import ai_seller  # noqa: E402
+from . import analytics  # noqa: E402
+from . import auth  # noqa: E402
+from . import billing  # noqa: E402
+from . import db  # noqa: E402
+from . import marketplaces  # noqa: E402
+from . import ops  # noqa: E402
 from .models import (  # noqa: E402
     GenerateImageRequest,
     ProductAnalysis,
@@ -33,17 +39,62 @@ from .trendyol_client import TrendyolClient  # noqa: E402
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+USERS_DATA_DIR = BASE_DIR.parent / "data" / "users"
 
-app = FastAPI(title="TrendolAi — Trendyol Satış Paneli")
+app = FastAPI(title="PazarAI — E-Ticaret Satış Asistanı")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.include_router(auth.router)
+app.include_router(billing.router)
+app.include_router(marketplaces.router)
+app.include_router(analytics.router)
+app.include_router(ops.router)
 
-trendyol = TrendyolClient(
+# Ortam değişkenlerindeki anahtarlar tek kiracılı kullanım için yedek istemcidir;
+# giriş yapan kullanıcı için kendi bağlantısındaki anahtarlar kullanılır.
+env_trendyol = TrendyolClient(
     seller_id=os.getenv("TRENDYOL_SELLER_ID", ""),
     api_key=os.getenv("TRENDYOL_API_KEY", ""),
     api_secret=os.getenv("TRENDYOL_API_SECRET", ""),
     env=os.getenv("TRENDYOL_ENV", "stage"),
 )
+
+# Oturum gerektirmeyen API yolları
+PUBLIC_API_PREFIXES = (
+    "/api/auth/",
+    "/api/billing/plans",
+    "/api/connections/platforms",
+    "/api/status",
+)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Korumalı /api yollarında oturum doğrular ve kullanıcı veri bağlamını kurar."""
+    path = request.url.path
+    if path.startswith("/api/") and not any(path.startswith(p) for p in PUBLIC_API_PREFIXES):
+        user = auth.get_session_user(request)
+        if not user:
+            return JSONResponse(status_code=401, content={"detail": "Oturum gerekli — giriş yap veya kayıt ol."})
+        request.state.user = user
+        ai_seller.set_user_dir(USERS_DATA_DIR / user["id"])
+    else:
+        ai_seller.set_user_dir(None)
+    return await call_next(request)
+
+
+def _current_user(request: Request) -> dict:
+    return request.state.user
+
+
+def _trendyol_for(request: Request) -> TrendyolClient:
+    """Kullanıcının kendi Trendyol bağlantısı; yoksa .env istemcisi (o da boşsa mock)."""
+    user = getattr(request.state, "user", None)
+    if user:
+        client = marketplaces.trendyol_client_for(user["id"])
+        if not client.mock:
+            return client
+    return env_trendyol
 
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 SUFFIX_TO_MIME = {v: k for k, v in ALLOWED_TYPES.items()}
@@ -139,29 +190,44 @@ def panel():
     return FileResponse(BASE_DIR / "static" / "panel.html")
 
 
+@app.get("/auth")
+def auth_page():
+    return FileResponse(BASE_DIR / "static" / "auth.html")
+
+
+@app.get("/account")
+def account_page():
+    return FileResponse(BASE_DIR / "static" / "account.html")
+
+
 @app.get("/api/status")
-def status():
+def status(request: Request):
+    user = auth.get_session_user(request)
     return {
-        "trendyol_mode": trendyol.mode_name,
+        "trendyol_mode": (_trendyol_for(request) if user else env_trendyol).mode_name,
         "ai_mode": "live" if _ai_available() else "demo",
         "imgbb_configured": bool(os.getenv("IMGBB_API_KEY")),
+        "logged_in": bool(user),
     }
 
 
 @app.post("/api/analyze")
-async def analyze(file: UploadFile):
+async def analyze(file: UploadFile, request: Request):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
     raw = await file.read()
     if len(raw) > 8 * 1024 * 1024:
         raise HTTPException(400, "Fotoğraf 8 MB'dan küçük olmalı.")
 
+    billing.check_limit(_current_user(request)["id"], "ai_listing")
+    trendyol = _trendyol_for(request)
+
     filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[file.content_type]}"
     (UPLOAD_DIR / filename).write_bytes(raw)
     image_b64 = base64.standard_b64encode(raw).decode()
 
     if not _ai_available():
-        return _demo_analysis(filename)
+        return _demo_analysis(filename, trendyol)
 
     # 1) Fotoğraf analizi
     analysis = ai_agent.analyze_image(image_b64, file.content_type)
@@ -200,14 +266,15 @@ async def analyze(file: UploadFile):
 
 
 @app.get("/api/categories")
-def list_categories():
+def list_categories(request: Request):
     """Arayüzdeki kategori arama kutusu için yaprak kategori listesi."""
-    return trendyol.get_leaf_categories()
+    return _trendyol_for(request).get_leaf_categories()
 
 
 @app.post("/api/recategorize")
-def recategorize(req: RecategorizeRequest):
+def recategorize(req: RecategorizeRequest, request: Request):
     """Kullanıcı kategoriyi elle değiştirince yeni kategorinin özelliklerini doldurur."""
+    trendyol = _trendyol_for(request)
     categories = trendyol.get_leaf_categories()
     cat = next((c for c in categories if c["id"] == req.category_id), None)
     if cat is None:
@@ -248,10 +315,11 @@ def plan_scenes(req: SceneRequest):
 
 
 @app.post("/api/generate-image")
-def generate_image(req: GenerateImageRequest):
+def generate_image(req: GenerateImageRequest, request: Request):
     """Planlanan sahnelerden birini üretir; aynı index ile tekrar çağrılırsa yeniden üretir."""
     if not _ai_available():
         raise HTTPException(503, "Görsel üretimi için GEMINI_API_KEY gerekli (AI şu an demo modda).")
+    billing.check_limit(_current_user(request)["id"], "image_gen")
     session = _get_session(req.image_filename)
     if session is None:
         raise HTTPException(404, "Analiz oturumu bulunamadı — fotoğrafı yeniden analiz et.")
@@ -278,7 +346,7 @@ def generate_image(req: GenerateImageRequest):
     return {"filename": filename, "label": scene.label, "scene_index": req.scene_index}
 
 
-def _demo_analysis(filename: str) -> dict:
+def _demo_analysis(filename: str, trendyol: TrendyolClient) -> dict:
     """GEMINI_API_KEY yokken akışı test etmek için örnek taslak üretir."""
     category = trendyol.get_leaf_categories()[6]  # Kupa & Bardak
     cat_attrs = trendyol.get_category_attributes(category["id"])
@@ -396,8 +464,10 @@ def delete_assistant_product(sku: str):
 
 
 @app.get("/api/assistant/insights")
-def assistant_insights(refresh: bool = False):
+def assistant_insights(request: Request, refresh: bool = False):
     """Toplu mağaza analizi — tüm yorumlar birlikte değerlendirilir."""
+    if refresh or not ai_seller._insights_file().exists():
+        billing.check_limit(_current_user(request)["id"], "insight")
     return ai_seller.generate_store_insights(force=refresh)
 
 
@@ -419,10 +489,17 @@ def assistant_suggest_reply(req: ReplyRequest):
 
 
 @app.post("/api/assistant/scrape-reviews")
-async def assistant_scrape_reviews(req: ScrapeRequest):
+async def assistant_scrape_reviews(req: ScrapeRequest, request: Request):
     """Ürün linkinden yorumları çeker (Trendyol / Hepsiburada / N11 / Amazon.com.tr)."""
     from .review_scraper import scrape_reviews_from_url
 
+    user_id = _current_user(request)["id"]
+    limit = billing.limit_for(user_id, "review_scrape")
+    if limit != -1 and db.get_usage(user_id, "review_scrape") >= limit:
+        raise HTTPException(
+            402,
+            f"Bu ay için yorum çekme limitine ulaştın ({limit}). Paketini yükselterek devam edebilirsin.",
+        )
     try:
         ai_seller.scrape_url_matches_store(req.url.strip(), ai_seller.load_settings().get("platform", "trendyol"))
         rows, meta = await scrape_reviews_from_url(req.url)
@@ -430,6 +507,9 @@ async def assistant_scrape_reviews(req: ScrapeRequest):
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(502, f"Yorumlar çekilemedi: {str(e)[:200]}")
+    if limit != -1:
+        rows = rows[: max(limit - db.get_usage(user_id, "review_scrape"), 0)]
+    db.increment_usage(user_id, "review_scrape", len(rows))
     result = ai_seller.add_scraped_reviews([
         {**r, "review_date": str(r.get("review_date") or "")} for r in rows
     ], meta={k: v for k, v in meta.items() if k != "html"})
@@ -445,8 +525,9 @@ def assistant_presets(product_name: Optional[str] = None):
 # --- İade analizi ---
 
 @app.post("/api/assistant/import-returns")
-async def import_returns(file: UploadFile):
+async def import_returns(file: UploadFile, request: Request):
     """İade CSV'si: product_name,sku,return_reason,return_date,quantity"""
+    billing.check_feature(_current_user(request)["id"], "returns")
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(400, "Lütfen .csv uzantılı bir dosya yükleyin.")
     raw = await file.read()
@@ -465,16 +546,18 @@ def delete_returns():
 
 
 @app.get("/api/assistant/returns-insights")
-def returns_insights():
+def returns_insights(request: Request):
     """İade kayıtlarının AI analizi."""
+    billing.check_feature(_current_user(request)["id"], "returns")
     return ai_seller.generate_returns_insights()
 
 
 # --- Kargo takip ---
 
 @app.post("/api/assistant/import-shipments")
-async def import_shipments(file: UploadFile):
+async def import_shipments(file: UploadFile, request: Request):
     """Kargo CSV'si: order_id,product_name,sku,carrier,tracking_number,status,shipped_date,delivered_date"""
+    billing.check_feature(_current_user(request)["id"], "shipments")
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(400, "Lütfen .csv uzantılı bir dosya yükleyin.")
     raw = await file.read()
@@ -493,8 +576,9 @@ def delete_shipments():
 
 
 @app.get("/api/assistant/shipments")
-def list_shipments(status: Optional[str] = None):
+def list_shipments(request: Request, status: Optional[str] = None):
     """Kargo listesi + firma bazlı özet. status: shipped|in_transit|delivered|active"""
+    billing.check_feature(_current_user(request)["id"], "shipments")
     return ai_seller.compute_shipments_stats(status)
 
 
@@ -516,7 +600,8 @@ def _host_image(filename: str) -> str:
 
 
 @app.post("/api/publish", response_model=PublishResult)
-def publish(draft: ProductDraft):
+def publish(draft: ProductDraft, request: Request):
+    trendyol = _trendyol_for(request)
     if draft.list_price < draft.sale_price:
         raise HTTPException(400, "Liste fiyatı satış fiyatından düşük olamaz.")
     if not trendyol.mock and not os.getenv("IMGBB_API_KEY"):
