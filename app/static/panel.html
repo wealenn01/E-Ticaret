@@ -1088,6 +1088,7 @@
               </div>
               <div id="productPicker"></div>
               <div id="presetGroups" class="preset-groups"></div>
+              <div id="insightsBlock" class="hidden"></div>
               <div id="answerSection"></div>
               <div id="storeCharts"></div>
             </div>
@@ -1231,7 +1232,12 @@ async function api(url, opts) {
   let data;
   try { data = JSON.parse(text); }
   catch { throw new Error('Sunucu beklenmedik yanıt döndürdü (' + r.status + '): ' + text.slice(0, 140)); }
-  if (!r.ok) throw new Error(data.detail || 'İstek başarısız (' + r.status + ')');
+  if (!r.ok) {
+    let msg = data.detail || 'İstek başarısız (' + r.status + ')';
+    if (Array.isArray(msg)) msg = msg.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
+    else if (typeof msg === 'object') msg = msg.msg || msg.message || JSON.stringify(msg);
+    throw new Error(msg);
+  }
   if (r.status === 403 && data.code === 'email_not_verified') {
     location.href = '/auth/verify-pending';
     throw new Error('E-posta doğrulaması gerekli.');
@@ -1481,7 +1487,7 @@ async function savePriceStock(idx) {
   const price = parseFloat($('pp_' + idx).value), stock = parseInt($('ps_' + idx).value, 10);
   try {
     const r = await api('/api/mp/price-stock', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: p.platform, items: [{ sku: p.sku, barcode: p.barcode, price, list_price: Math.max(p.list_price, price), stock }] }) });
+      body: JSON.stringify({ platform: p.platform, items: [{ sku: p.sku, barcode: p.barcode, price, list_price: Math.max(Number(p.list_price) || 0, price) || price, stock }] }) });
     toast(r.message, 'ok');
     p.price = price; p.stock = stock;
   } catch (e) { toast(e.message); }
@@ -1624,7 +1630,7 @@ async function loadBuybox() {
           '<div>Buybox: <strong>' + fmtTL(r.buybox_price) + '</strong> (' + esc(r.buybox_seller) + ')</div>' +
           '<span class="bb-win ' + (r.we_have_buybox ? 'yes' : 'no') + '">' + (r.we_have_buybox ? '🏆 Buybox sizde' : 'Buybox rakipte') + '</span>' +
           '<button class="mini-btn" onclick="suggestPrice(' + idx + ', this)">🤖 AI Fiyat Önerisi</button>') +
-      '<button class="mini-btn danger" onclick="untrack(' + idx + ')">Kaldır</button>' +
+      '<button class="mini-btn danger" onclick="untrack(\'' + esc(r.id || '') + '\')">Kaldır</button>' +
       '<div id="bbSug_' + idx + '" style="flex-basis:100%"></div>' +
       '</div>').join('') : '<div class="card"><p class="hint">Henüz takipte ürün yok — yukarıdan SKU ekle.</p></div>';
     window._bb = d.rows;
@@ -1642,8 +1648,9 @@ async function trackBuybox() {
     toast('Ürün takibe alındı.', 'ok'); loadBuybox();
   } catch (e) { toast(e.message); }
 }
-async function untrack(idx) {
-  try { await api('/api/mp/buybox/' + idx, { method: 'DELETE' }); loadBuybox(); }
+async function untrack(trackId) {
+  if (!trackId) return;
+  try { await api('/api/mp/buybox/' + encodeURIComponent(trackId), { method: 'DELETE' }); loadBuybox(); }
   catch (e) { toast(e.message); }
 }
 async function suggestPrice(idx, btn) {
@@ -1844,7 +1851,7 @@ function renderDraftGallery(filenames) {
     return;
   }
   $('draftImg').classList.add('hidden');
-  gal.innerHTML = imgs.map(f => '<img src="/uploads/' + esc(f) + '" alt="">').join('');
+  gal.innerHTML = imgs.map(f => '<img src="/api/uploads/' + esc(f) + '" alt="">').join('');
 }
 
 $('analyzeBtn').onclick = async () => {
@@ -1878,7 +1885,7 @@ function fillDraftForm(data) {
   const d = data.draft;
   const sources = d.source_image_filenames?.length ? d.source_image_filenames : [d.image_filename];
   renderDraftGallery(sources);
-  $('draftImg').src = '/uploads/' + d.image_filename;
+  $('draftImg').src = '/api/uploads/' + d.image_filename;
   $('f_title').value = d.title;
   $('f_desc').innerHTML = d.description_html;
   $('f_brand').value = d.brand;
@@ -1987,7 +1994,7 @@ async function genOne(i) {
     const data = await api('/api/generate-image', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image_filename: draft.image_filename, scene_index: i }) });
     genFiles[i] = data.filename;
-    imgBox.innerHTML = '<img src="/uploads/' + data.filename + '">';
+    imgBox.innerHTML = '<img src="/api/uploads/' + data.filename + '">';
     cb.disabled = false; rb.disabled = false;
   } catch (e) {
     imgBox.innerHTML = '<div class="sc-loading">⚠️ ' + e.message + '</div>';
@@ -2070,7 +2077,7 @@ function renderWarehouse() {
     const dateStr = when ? new Date(when * 1000).toLocaleDateString('tr-TR') : '';
     const pics = (it.source_image_filenames || []).length;
     return '<article class="wh-card">' +
-      '<img src="/uploads/' + esc(it.image_filename) + '" alt="">' +
+      '<img src="/api/uploads/' + esc(it.image_filename) + '" alt="">' +
       '<div class="wh-card-body">' +
         '<h3 class="wh-card-title">' + esc(it.title) + '</h3>' +
         '<div class="wh-card-meta">' + price + ' · ' + dateStr + (pics > 1 ? ' · ' + pics + ' foto' : '') + '</div>' +

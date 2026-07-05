@@ -121,22 +121,45 @@ def limit_for(user_id: str, metric: str) -> int:
     return plan_of(user_id)["limits"].get(metric, 0)
 
 
-def check_limit(user_id: str, metric: str, amount: int = 1) -> None:
-    """Limit aşılırsa 402 fırlatır; geçmesi durumunda sayıcıyı atomik olarak artırır.
-    SQLite transaction içinde kontrol+artış yapılır — eşzamanlı isteklerde TOCTOU olmaz.
-    """
+def _limit_error(metric: str, current: int, limit: int) -> HTTPException:
+    label = METRIC_LABELS.get(metric, metric)
+    return HTTPException(
+        402,
+        f"Bu ay için {label} limitine ulaştın ({current}/{limit}). "
+        f"Daha yüksek bir pakete geçerek devam edebilirsin.",
+    )
+
+
+def verify_limit(user_id: str, metric: str, amount: int = 1) -> None:
+    """Limit aşılırsa 402 fırlatır; sayaç artırmaz."""
+    limit = limit_for(user_id, metric)
+    if limit == -1:
+        return
+    current = db.get_usage(user_id, metric)
+    if current + amount > limit:
+        raise _limit_error(metric, current, limit)
+
+
+def consume_limit(user_id: str, metric: str, amount: int = 1) -> None:
+    """Başarılı işlem sonrası sayacı atomik artırır."""
     limit = limit_for(user_id, metric)
     if limit == -1:
         db.increment_usage(user_id, metric, amount)
         return
     allowed, current = db.check_and_increment_usage(user_id, metric, limit, amount)
     if not allowed:
-        label = METRIC_LABELS.get(metric, metric)
-        raise HTTPException(
-            402,
-            f"Bu ay için {label} limitine ulaştın ({current}/{limit}). "
-            f"Daha yüksek bir pakete geçerek devam edebilirsin.",
-        )
+        raise _limit_error(metric, current, limit)
+
+
+def release_limit(user_id: str, metric: str, amount: int = 1) -> None:
+    """Başarısız işlemde önceden artırılmış kotayı geri verir."""
+    db.decrement_usage(user_id, metric, amount)
+
+
+def check_limit(user_id: str, metric: str, amount: int = 1) -> None:
+    """Geriye uyumluluk: doğrula + tüket."""
+    verify_limit(user_id, metric, amount)
+    consume_limit(user_id, metric, amount)
 
 
 def check_feature(user_id: str, feature: str) -> None:

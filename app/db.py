@@ -185,16 +185,17 @@ def increment_usage(user_id: str, metric: str, amount: int = 1) -> int:
 
 
 def check_and_increment_usage(user_id: str, metric: str, limit: int, amount: int = 1) -> tuple:
-    """Atomik kontrol+artır. (geçti, yeni_sayı) döndürür. TOCTOU race condition'u önler."""
+    """Atomik kontrol+artır. (geçti, yeni_sayı) döndürür."""
     period = current_period()
     with _conn() as c:
-        # Önce mevcut sayıyı oku; limit aşılmıyorsa artır
+        c.execute("BEGIN IMMEDIATE")
         row = c.execute(
             "SELECT count FROM usage WHERE user_id=? AND period=? AND metric=?",
             (user_id, period, metric),
         ).fetchone()
         current = row["count"] if row else 0
         if current + amount > limit:
+            c.execute("ROLLBACK")
             return False, current
         c.execute(
             "INSERT INTO usage (user_id, period, metric, count) VALUES (?,?,?,?) "
@@ -203,6 +204,24 @@ def check_and_increment_usage(user_id: str, metric: str, limit: int, amount: int
         )
         new_count = current + amount
     return True, new_count
+
+
+def decrement_usage(user_id: str, metric: str, amount: int = 1) -> int:
+    """Kullanım sayacını düşürür (başarısız işlem geri alımı)."""
+    period = current_period()
+    with _conn() as c:
+        row = c.execute(
+            "SELECT count FROM usage WHERE user_id=? AND period=? AND metric=?",
+            (user_id, period, metric),
+        ).fetchone()
+        if not row:
+            return 0
+        new_count = max(0, row["count"] - amount)
+        c.execute(
+            "UPDATE usage SET count=? WHERE user_id=? AND period=? AND metric=?",
+            (new_count, user_id, period, metric),
+        )
+        return new_count
 
 
 def usage_summary(user_id: str) -> dict:

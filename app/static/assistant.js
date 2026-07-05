@@ -18,17 +18,28 @@
   const SECTION_TITLES = { reviews: "Yorumlar", analysis: "Danışman", cargo: "Kargo", returns: "İade" };
   let state = {
     view: "hub", platform: "trendyol", sellerModel: null, section: "reviews",
-    products: [], allProductCount: 0, stats: null, insights: null,
+    products: [], allProducts: [], allProductCount: 0,
+    stats: null, consultantStats: null, insights: null,
     expandedSku: null, selectedSku: null,
     askLoading: false, importMode: "link", askResult: null, askError: null,
   };
+
+  function formatApiError(detail) {
+    if (!detail) return "İstek başarısız";
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map(d => d.msg || d.message || JSON.stringify(d)).join("; ");
+    }
+    if (typeof detail === "object") return detail.msg || detail.message || JSON.stringify(detail);
+    return String(detail);
+  }
 
   async function api(url, opts) {
     const r = await fetch(url, opts);
     const text = await r.text();
     let data;
     try { data = JSON.parse(text); } catch { throw new Error("Sunucu hatası (" + r.status + ")"); }
-    if (!r.ok) throw new Error(data.detail || "İstek başarısız");
+    if (!r.ok) throw new Error(formatApiError(data.detail) || "İstek başarısız");
     return data;
   }
 
@@ -223,20 +234,33 @@
   }
 
   async function refreshData() {
-    const [products, allProducts, stats, settings, insights] = await Promise.all([
+    const [products, allProducts, stats, consultantStats, settings] = await Promise.all([
       api("/api/assistant/products?platform=" + state.platform),
       api("/api/assistant/products?platform=all"),
       api("/api/assistant/stats?platform=" + state.platform),
+      api("/api/assistant/stats?platform=all"),
       api("/api/assistant/settings"),
-      api("/api/assistant/insights").catch(() => null),
     ]);
     state.products = products.products || [];
+    state.allProducts = allProducts.products || [];
     state.allProductCount = allProducts.total_products || 0;
     state.stats = stats;
-    state.insights = insights;
+    state.consultantStats = consultantStats;
     state.platform = settings.platform || state.platform;
     state.sellerModel = settings.seller_model || null;
     renderAll();
+  }
+
+  async function loadInsightsIfNeeded() {
+    if (state.insights || state.section !== "analysis") return;
+    const stats = state.consultantStats || state.stats || {};
+    if ((stats.total_reviews || 0) === 0) return;
+    try {
+      state.insights = await api("/api/assistant/insights");
+    } catch {
+      state.insights = null;
+    }
+    renderAnalysisFooter();
   }
 
   function renderHubMenu() {
@@ -259,8 +283,10 @@
     state.view = "section";
     state.section = sec;
     state.expandedSku = null;
+    if (sec === "analysis") state.insights = null;
     showHub(false);
     renderAll();
+    if (sec === "analysis") loadInsightsIfNeeded();
   }
 
   function goHub() {
@@ -332,6 +358,10 @@
 
   function renderAnalysisSection() {
     showPanel("analysis");
+    const consultantProducts = state.allProducts.length ? state.allProducts : state.products;
+    const consultantStats = state.consultantStats || state.stats || {};
+    const dataCount = consultantStats.total_reviews || 0;
+
     const needsModel = !state.sellerModel;
     $("sellerModelPicker").innerHTML = `
       <strong>Satış modeliniz</strong>
@@ -358,31 +388,40 @@
       if (state.expandedSku) renderProductGrid();
     });
 
-    const selected = state.selectedSku ? state.products.find(p => p.sku === state.selectedSku) : null;
-    $("productPicker").innerHTML = state.products.length ? `
+    const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
+    const dataHint = dataCount > 0
+      ? `${dataCount} yorum üzerinden analiz yapılır${consultantProducts.length ? ` · ${consultantProducts.length} ürün` : ""}.`
+      : "Henüz veri yok — Yorumlar sekmesinden link/CSV ile ekleyin veya demo hesap açın.";
+
+    $("productPicker").innerHTML = `
       <strong>Ürün seçin (isteğe bağlı)</strong>
-      <p class="hint">${selected ? `Şu an: ${selected.product_name}` : "Hiçbir ürün seçilmedi — genel mağaza analizi."}</p>
+      <p class="hint">${dataHint}</p>
+      ${consultantProducts.length ? `
+      <p class="hint">${selected ? `Şu an: ${selected.product_name}` : "Hiçbir ürün seçilmedi — tüm mağaza verisi kullanılır."}</p>
       <div class="consultant-product-grid">
         <button type="button" class="consultant-chip${!state.selectedSku ? " on" : ""}" data-sku="">Tüm mağaza</button>
-        ${state.products.map(p => `
+        ${consultantProducts.map(p => `
           <button type="button" class="consultant-chip${state.selectedSku === p.sku ? " on" : ""}" data-sku="${esc(p.sku)}" title="${esc(p.product_name)}">
             ${chipThumbHtml(p)}
             <span>${esc(p.product_name.length > 28 ? p.product_name.slice(0, 26) + "…" : p.product_name)}</span>
           </button>`).join("")}
-      </div>` : "";
+      </div>` : ""}`;
 
-    $("productPicker").querySelectorAll(".consultant-chip").forEach(btn => btn.onclick = () => {
-      state.selectedSku = btn.dataset.sku || null;
-      renderAnalysisSection();
-      loadPresets();
-    });
+    const picker = $("productPicker");
+    if (picker) {
+      picker.querySelectorAll(".consultant-chip").forEach(btn => btn.onclick = () => {
+        state.selectedSku = btn.dataset.sku || null;
+        renderAnalysisSection();
+        loadPresets();
+      });
+    }
 
     loadPresets();
     renderAnalysisFooter();
   }
 
   function renderAnalysisFooter() {
-    const stats = state.stats || {};
+    const stats = state.consultantStats || state.stats || {};
     const total = stats.total_reviews || 0;
     const posPct = total ? Math.round(100 * (stats.positive_reviews || 0) / total) : 0;
     const negPct = total ? Math.round(100 * (stats.negative_reviews || 0) / total) : 0;
@@ -404,13 +443,27 @@
           </div>
         </div>`;
       } else {
-        chartsEl.innerHTML = "";
+        chartsEl.innerHTML = '<p class="hint">Grafikler için yorum verisi gerekir — Yorumlar sekmesinden link/CSV ile ekleyin veya demo hesap kullanın.</p>';
       }
     }
     const insightsEl = $("insightsBlock");
     if (insightsEl) {
-      insightsEl.innerHTML = "";
-      insightsEl.classList.add("hidden");
+      const ins = state.insights;
+      if (ins && ins.general_summary && ins.general_summary !== "—") {
+        const recs = (ins.recommendations || []).slice(0, 4).map(r => `<li>${esc(r)}</li>`).join("");
+        insightsEl.innerHTML = `
+          <div class="chart-card insights-card">
+            <strong>Mağaza AI özeti</strong>
+            <p class="hint">${esc(ins.general_summary)}</p>
+            ${ins.main_complaint_topic && ins.main_complaint_topic !== "—"
+              ? `<p class="hint"><strong>Öne çıkan konu:</strong> ${esc(ins.main_complaint_topic)} — ${esc(ins.main_complaint_detail || "")}</p>` : ""}
+            ${recs ? `<ul class="consultant-rec-list">${recs}</ul>` : ""}
+          </div>`;
+        insightsEl.classList.remove("hidden");
+      } else {
+        insightsEl.innerHTML = "";
+        insightsEl.classList.add("hidden");
+      }
     }
     renderAnswerSection();
   }
@@ -446,7 +499,8 @@
   }
 
   async function loadPresets() {
-    const selected = state.selectedSku ? state.products.find(p => p.sku === state.selectedSku) : null;
+    const consultantProducts = state.allProducts.length ? state.allProducts : state.products;
+    const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
     const groups = await api("/api/assistant/presets" + (selected ? "?product_name=" + encodeURIComponent(selected.product_name) : ""));
     $("presetGroups").innerHTML = groups.map(g => `
       <section class="preset-group">

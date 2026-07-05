@@ -1,13 +1,15 @@
-"""N11 entegrasyon istemcisi (yeni REST API).
+"""N11 entegrasyon istemcisi (resmi REST API).
 
-Dokümantasyon: https://api.n11.com/ms (N11 Satıcı Ofisi > Entegrasyon)
-Auth: appkey + appsecret header'ları.
+Dokümantasyon: https://magazadestek.n11.com (Satış Süreçleri > RestAPI)
+Auth: appKey + appSecret header'ları (no-auth; kimlik header'da taşınır).
 
-Kapsanan uçlar:
-  Ürünler     GET  /ms/product-query
-  Fiyat/Stok  POST /ms/product/updateStockByStockSellerCode benzeri toplu uç
-  Siparişler  GET  /ms/orders
-Soru-cevap ve iade uçları REST API'de sınırlıdır; anahtar yoksa DEMO çalışır.
+Kapsanan resmi REST uçları (Temmuz 2026):
+  Ürünler     GET  https://api.n11.com/ms/product-query               (GetProductQuery)
+  Fiyat/Stok  POST https://api.n11.com/ms/product/tasks/price-stock-update  (UpdateProductPriceAndStock)
+  Siparişler  GET  https://api.n11.com/rest/delivery/v1/shipmentPackages    (GetShipmentPackages)
+
+Desteklenmeyen (N11 REST API'de herkese açık uç yok — Satıcı Ofisi/SOAP'tan yönetilir):
+  iade (ClaimService), müşteri soru-cevap, finans/hakediş raporu, buybox.
 """
 from typing import Any, Optional
 
@@ -15,12 +17,15 @@ import httpx
 
 from . import base as B
 
-BASE = "https://api.n11.com/ms"
+BASE = "https://api.n11.com"
+INTEGRATOR = "SelfIntegration"
 
+# GetShipmentPackages statüleri: Created, Picking, Shipped, Cancelled,
+# Delivered, Unpacked, UnSupplied.
 STATUS_MAP = {
-    "Created": "Created", "Approved": "Picking", "Shipped": "Shipped",
-    "Delivered": "Delivered", "Rejected": "Cancelled", "Returned": "Returned",
-    "Completed": "Delivered", "Cancelled": "Cancelled",
+    "Created": "Created", "Picking": "Picking", "Shipped": "Shipped",
+    "Delivered": "Delivered", "Cancelled": "Cancelled", "Returned": "Returned",
+    "Unpacked": "Created", "UnSupplied": "Cancelled", "Completed": "Delivered",
 }
 
 
@@ -56,20 +61,29 @@ class N11API(B.MarketplaceClient):
     def list_products(self, page: int = 0, size: int = 50) -> list[dict]:
         if not self.configured:
             return self._tag(B.demo_products())
-        # N11 REST API ürün sorgu ucu — farklı Sıfatlı Ofisi versiyonlarında
-        # /product-query veya /catalog/product/list olabilir
-        data = self._req("GET", "/product-query", params={"page": page, "size": size})
+        # GetProductQuery — GET /ms/product-query (size max 250)
+        data = self._req("GET", "/ms/product-query", params={"page": page, "size": min(size, 250)})
         rows = []
-        for p in (data.get("content") or data.get("products") or data.get("productList") or []):
+        for p in (data.get("content") or data.get("products") or []):
+            # Fiyat/stok varyant (stockItems/skus) altında olabilir; ürün seviyesine de düşülür.
+            variant = (p.get("stockItems") or p.get("skus") or [{}])[0] if isinstance(p.get("stockItems") or p.get("skus"), list) else {}
+            sale = p.get("salePrice", variant.get("salePrice", 0))
+            listp = p.get("listPrice", variant.get("listPrice", 0))
+            qty = p.get("quantity", variant.get("quantity", p.get("stockCount", 0)))
+            images = p.get("images") or p.get("imageUrls") or []
+            image = ""
+            if images:
+                first = images[0]
+                image = first.get("url", "") if isinstance(first, dict) else str(first)
             rows.append({
-                "sku": p.get("stockCode", "") or p.get("sellerStockCode", ""),
-                "barcode": p.get("barcode", ""),
-                "title": p.get("title", "") or p.get("displayName", ""),
-                "price": float(p.get("salePrice", p.get("displayPrice", 0)) or 0),
-                "list_price": float(p.get("listPrice", p.get("price", 0)) or 0),
-                "stock": int(p.get("quantity", p.get("stockCount", 0)) or 0),
-                "status": "active" if str(p.get("status", "")).lower() in ("active", "1", "true", "approved") else "passive",
-                "image": (p.get("imageUrls") or [""])[0] if isinstance(p.get("imageUrls"), list) else "",
+                "sku": p.get("stockCode", "") or variant.get("stockCode", ""),
+                "barcode": p.get("barcode", "") or variant.get("barcode", ""),
+                "title": p.get("title", ""),
+                "price": float(sale or 0),
+                "list_price": float(listp or 0),
+                "stock": int(qty or 0),
+                "status": "active" if str(p.get("saleStatus", p.get("status", ""))).lower() in ("on_sale", "active", "1", "true") else "passive",
+                "image": image,
                 "url": p.get("productUrl", ""),
             })
         return self._tag(rows)
@@ -78,23 +92,25 @@ class N11API(B.MarketplaceClient):
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"{len(items)} ürün güncellendi (DEMO — anahtar girilince gerçek mağazaya gider)."}
-        # N11 toplu stok/fiyat güncelleme — REST API'de POST /product/price-stock-update
-        # Alternatif: /stock/seller-stock-update veya /price/price-update ayrı ayrı
-        payload = {"payload": {"integrator": "SelfIntegration", "skus": []}}
+        # UpdateProductPriceAndStock — POST /ms/product/tasks/price-stock-update
+        # Kural: fiyat güncellenecekse listPrice + salePrice BİRLİKTE gönderilmeli,
+        # listPrice >= salePrice olmalı; max 1000 sku.
+        skus: list[dict] = []
         for it in items:
             entry: dict = {"stockCode": it.get("sku") or it.get("barcode")}
             if it.get("stock") is not None:
                 entry["quantity"] = int(it["stock"])
             if it.get("price") is not None:
-                entry["salePrice"] = float(it["price"])
-                entry["listPrice"] = float(it.get("list_price") or it["price"])
-            payload["payload"]["skus"].append(entry)
-        try:
-            self._req("POST", "/product/price-stock-update", json=payload)
-        except B.MarketplaceError:
-            # Bazı N11 hesaplarında farklı endpoint; eski endpoint dene
-            self._req("POST", "/stock/seller-stock-update", json=payload)
-        return {"ok": True, "mode": "live", "message": f"{len(items)} ürün güncelleme N11 kuyruğuna alındı."}
+                sale = round(float(it["price"]), 2)
+                listp = round(float(it.get("list_price") or it["price"]), 2)
+                entry["salePrice"] = sale
+                entry["listPrice"] = max(listp, sale)
+                entry["currencyType"] = "TL"
+            skus.append(entry)
+        data = self._req("POST", "/ms/product/tasks/price-stock-update",
+                         json={"payload": {"integrator": INTEGRATOR, "skus": skus}})
+        return {"ok": True, "mode": "live", "task_id": str(data.get("id", "")),
+                "message": f"{len(items)} ürün güncelleme N11 kuyruğuna alındı (task {data.get('id', '')})."}
 
     # ---- Siparişler ----
 
@@ -102,22 +118,29 @@ class N11API(B.MarketplaceClient):
         if not self.configured:
             rows = B.demo_orders("N11-")
             return self._tag([r for r in rows if not status or r["status"] == status])
-        data = self._req("GET", "/orders", params={"page": 0, "size": 100})
+        # GetShipmentPackages — GET /rest/delivery/v1/shipmentPackages
+        # startDate/endDate: milisaniye timestamp, GMT+3. size max 100.
+        import time as _t
+        end = int(_t.time() * 1000)
+        params = {"startDate": end - days * 86400_000, "endDate": end,
+                  "page": 0, "size": 100, "orderByField": "true", "orderByDirection": "DESC"}
+        data = self._req("GET", "/rest/delivery/v1/shipmentPackages", params=params)
         rows = []
-        for o in (data.get("content") or []):
+        for o in (data.get("content") or data.get("shipmentPackages") or []):
             lines = o.get("lines") or o.get("orderItems") or []
+            ship = o.get("shippingAddress") or o.get("shipmentAddress") or {}
             rows.append({
                 "order_id": str(o.get("orderNumber", o.get("id", ""))),
-                "package_id": str(o.get("id", "")),
-                "date": str(o.get("createDate", ""))[:16].replace("T", " "),
-                "customer": str(o.get("customerFullName", o.get("buyerName", ""))),
-                "city": str((o.get("shipmentAddress") or {}).get("city", "")),
+                "package_id": str(o.get("id", o.get("packageId", ""))),
+                "date": str(o.get("createDate", o.get("orderDate", "")))[:16].replace("T", " "),
+                "customer": str(o.get("customerFullName", o.get("fullName", o.get("buyerName", "")))),
+                "city": str(ship.get("city", "")),
                 "status": STATUS_MAP.get(str(o.get("status", "")), str(o.get("status", ""))),
-                "total": float(o.get("totalAmount", 0) or 0),
+                "total": float(o.get("totalAmount", o.get("totalPrice", 0)) or 0),
                 "cargo": {
                     "carrier": str(o.get("cargoProviderName", o.get("shipmentCompany", ""))),
                     "tracking": str(o.get("cargoTrackingNumber", "") or ""),
-                    "url": "",
+                    "url": str(o.get("cargoTrackingLink", "") or ""),
                 },
                 "items": [{"sku": l.get("stockCode", l.get("sellerStockCode", "")),
                            "title": l.get("productName", l.get("title", "")),

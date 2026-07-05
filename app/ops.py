@@ -260,7 +260,17 @@ def _buybox_file():
 
 def _load_tracked() -> list[dict]:
     f = _buybox_file()
-    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    if not f.exists():
+        return []
+    items = json.loads(f.read_text(encoding="utf-8"))
+    changed = False
+    for t in items:
+        if not t.get("id"):
+            t["id"] = db.new_id()
+            changed = True
+    if changed:
+        _save_tracked(items)
+    return items
 
 
 def _save_tracked(items: list[dict]) -> None:
@@ -304,20 +314,26 @@ def track_buybox(req: TrackRequest, request: Request):
         raise HTTPException(409, "Bu ürün zaten takipte.")
     if len(tracked) >= 50:
         raise HTTPException(400, "En fazla 50 ürün takip edebilirsin.")
-    tracked.append({"platform": req.platform, "sku_or_url": req.sku_or_url.strip(), "label": req.label.strip()})
+    tracked.append({
+        "id": db.new_id(),
+        "platform": req.platform,
+        "sku_or_url": req.sku_or_url.strip(),
+        "label": req.label.strip(),
+    })
     _save_tracked(tracked)
     return {"ok": True, "count": len(tracked)}
 
 
-@router.delete("/buybox/{index}")
-def untrack_buybox(index: int, request: Request):
+@router.delete("/buybox/{track_id}")
+def untrack_buybox(track_id: str, request: Request):
     from . import billing
 
     billing.check_feature(_user(request)["id"], "buybox")
     tracked = _load_tracked()
-    if not (0 <= index < len(tracked)):
+    idx = next((i for i, t in enumerate(tracked) if t.get("id") == track_id), -1)
+    if idx < 0:
         raise HTTPException(404, "Takip kaydı bulunamadı.")
-    tracked.pop(index)
+    tracked.pop(idx)
     _save_tracked(tracked)
     return {"ok": True}
 

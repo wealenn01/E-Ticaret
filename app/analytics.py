@@ -114,7 +114,14 @@ def compute_stats() -> dict:
         return o["quantity"] * o["unit_price"]
 
     def line_profit(o):
-        commission = line_revenue(o) * (o["commission_rate"] / 100 if o["commission_rate"] > 1 else o["commission_rate"])
+        rate = o["commission_rate"]
+        if rate <= 0:
+            fraction = 0
+        elif rate < 1:
+            fraction = rate
+        else:
+            fraction = rate / 100
+        commission = line_revenue(o) * fraction
         return line_revenue(o) - commission - o["quantity"] * o["cost"]
 
     revenue = sum(line_revenue(o) for o in sold)

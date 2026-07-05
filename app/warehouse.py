@@ -119,6 +119,8 @@ def update_item(item_id: str, req: WarehouseSaveRequest, request: Request):
         raise HTTPException(404, "Depo kaydı bulunamadı.")
     existing = _read_item(path)
     draft = req.draft
+    if not draft.get("title") or not draft.get("image_filename"):
+        raise HTTPException(400, "Taslak eksik — başlık ve görsel gerekli.")
     sources = draft.get("source_image_filenames") or [draft.get("image_filename")]
     existing.update({
         "updated_at": time.time(),

@@ -335,49 +335,17 @@ def delete_account(req: DeleteAccountRequest, request: Request, response: Respon
 # ---- Demo hesap (GitHub akışı) ----
 
 def _seed_demo_data(user_id: str) -> None:
-    import csv as csv_mod
     from pathlib import Path as _Path
 
-    sample_dir = _Path(__file__).resolve().parent.parent / "sample-data"
     users_data_dir = _Path(__file__).resolve().parent.parent / "data" / "users" / user_id
     users_data_dir.mkdir(parents=True, exist_ok=True)
-
-    reviews_csv = sample_dir / "yorumlar_ornek.csv"
-    if reviews_csv.exists():
-        try:
-            from . import ai_seller as _ai_seller
-            _ai_seller.set_user_dir(users_data_dir)
-            _ai_seller.import_reviews_csv(reviews_csv.read_bytes())
-        except Exception:
-            pass
-
-    returns_csv = sample_dir / "iadeler_ornek.csv"
-    if returns_csv.exists():
-        try:
-            from . import ai_seller as _ai_seller
-            _ai_seller.set_user_dir(users_data_dir)
-            _ai_seller.import_returns_csv(returns_csv.read_bytes())
-        except Exception:
-            pass
-
-    shipments_csv = sample_dir / "kargolar_ornek.csv"
-    if shipments_csv.exists():
-        try:
-            from . import ai_seller as _ai_seller
-            _ai_seller.set_user_dir(users_data_dir)
-            _ai_seller.import_shipments_csv(shipments_csv.read_bytes())
-        except Exception:
-            pass
-
-    orders_csv = sample_dir / "siparisler_ornek.csv"
-    if orders_csv.exists():
-        try:
-            from . import ai_seller as _ai_seller
-            from . import analytics as _analytics
-            _ai_seller.set_user_dir(users_data_dir)
-            _analytics.import_orders_csv(orders_csv.read_bytes())
-        except Exception:
-            pass
+    try:
+        from . import ai_seller as _ai_seller
+        _ai_seller.set_user_dir(users_data_dir)
+        _ai_seller.seed_sample_data(include_orders=True)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Demo veri yüklenemedi: %s", user_id)
 
 
 @router.post("/demo")

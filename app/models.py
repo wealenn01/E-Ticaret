@@ -81,6 +81,7 @@ class ProductDraft(BaseModel):
     barcode: str = ""
     stock_code: str = ""
     currency: str = "TRY"
+    dimensional_weight: float = 1.0  # Trendyol createProducts V2'de zorunlu (desi)
     extra_image_filenames: list[str] = []
 
 

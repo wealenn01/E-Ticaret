@@ -7,7 +7,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 from dotenv import load_dotenv
@@ -62,7 +62,6 @@ async def _lifespan(application):
 
 
 app = FastAPI(title="PazarAI — E-Ticaret Satış Asistanı", lifespan=_lifespan)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth.router)
 app.include_router(billing.router)
@@ -136,17 +135,35 @@ def _detect_mime(raw: bytes) -> Optional[str]:
 
 
 # Analiz oturumları bellekte + kullanıcı dizininde saklanır.
-# .meta.json dosyaları UPLOAD_DIR yerine USERS_DATA_DIR altında tutulur
-# (herkese açık /uploads/ üzerinden erişilemez).
+# Görseller kullanıcı başına uploads/ altında tutulur; yalnızca oturumlu erişim.
 SESSIONS: dict = {}
 
 
-def _safe_upload(filename: str) -> Path:
-    """Dosya adının uploads/ dışına çıkmasını engeller."""
-    p = (UPLOAD_DIR / filename).resolve()
-    if p.parent != UPLOAD_DIR.resolve():
+def _session_key(user_id: str, filename: str) -> Tuple[str, str]:
+    return user_id, Path(filename).name
+
+
+def _user_upload_dir(user_id: str) -> Path:
+    d = USERS_DATA_DIR / user_id / "uploads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _safe_upload(user_id: str, filename: str) -> Path:
+    """Dosya adının kullanıcı uploads dizini dışına çıkmasını engeller."""
+    safe_name = Path(filename).name
+    user_dir = _user_upload_dir(user_id).resolve()
+    user_path = (user_dir / safe_name).resolve()
+    if user_path.is_file() and user_path.parent == user_dir:
+        return user_path
+    legacy = (UPLOAD_DIR / safe_name).resolve()
+    if legacy.is_file() and legacy.parent == UPLOAD_DIR.resolve() and _meta_path(user_id, safe_name).exists():
+        return legacy
+    if user_path.parent != user_dir:
         raise HTTPException(400, "Geçersiz dosya adı.")
-    return p
+    if not user_path.is_file():
+        raise HTTPException(404, "Dosya bulunamadı veya erişim yetkiniz yok.")
+    return user_path
 
 
 def _meta_path(user_id: str, filename: str) -> Path:
@@ -158,7 +175,7 @@ def _meta_path(user_id: str, filename: str) -> Path:
 
 
 def _save_session(user_id: str, filename: str) -> None:
-    s = SESSIONS.get(filename)
+    s = SESSIONS.get(_session_key(user_id, filename))
     if not s:
         return
     data = {"analysis": s["analysis"].model_dump()}
@@ -168,8 +185,9 @@ def _save_session(user_id: str, filename: str) -> None:
 
 
 def _get_session(user_id: str, filename: str) -> Optional[dict]:
-    """Bellekten, yoksa diskten oturumu getirir."""
-    s = SESSIONS.get(filename)
+    """Bellekten, yoksa diskten oturumu getirir (yalnızca ilgili kullanıcı)."""
+    key = _session_key(user_id, filename)
+    s = SESSIONS.get(key)
     if s:
         return s
     meta = _meta_path(user_id, filename)
@@ -179,7 +197,7 @@ def _get_session(user_id: str, filename: str) -> Optional[dict]:
     s = {"analysis": ProductAnalysis(**data["analysis"])}
     if data.get("scenes"):
         s["scenes"] = [SceneSpec(**sc) for sc in data["scenes"]]
-    SESSIONS[filename] = s
+    SESSIONS[key] = s
     return s
 
 
@@ -265,6 +283,15 @@ def status(request: Request):
     }
 
 
+@app.get("/api/uploads/{filename}")
+def get_upload(filename: str, request: Request):
+    """Kullanıcıya ait yüklenen görseli oturumla sunar."""
+    user_id = _current_user(request)["id"]
+    path = _safe_upload(user_id, filename)
+    media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    return FileResponse(path, media_type=media.get(path.suffix.lower(), "application/octet-stream"))
+
+
 @app.post("/api/analyze")
 async def analyze(request: Request, files: list[UploadFile] = File(...)):
     if not files:
@@ -273,21 +300,23 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
         raise HTTPException(400, "En fazla 6 fotoğraf yükleyebilirsin.")
 
     user_id = _current_user(request)["id"]
+    if _ai_available():
+        billing.verify_limit(user_id, "ai_listing")
+
+    user_upload_dir = _user_upload_dir(user_id)
     saved: list[tuple[str, str, str]] = []  # filename, b64, content_type
     for file in files:
         raw = await file.read()
         if len(raw) > 8 * 1024 * 1024:
             raise HTTPException(400, "Her fotoğraf 8 MB'dan küçük olmalı.")
-        # Magic byte doğrulaması — Content-Type yanıltmasına karşı
         detected = _detect_mime(raw)
         if detected not in ALLOWED_TYPES:
             raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
         filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[detected]}"
-        (UPLOAD_DIR / filename).write_bytes(raw)
+        (user_upload_dir / filename).write_bytes(raw)
         image_b64 = base64.standard_b64encode(raw).decode()
         saved.append((filename, image_b64, detected))
 
-    billing.check_limit(user_id, "ai_listing")
     trendyol = _trendyol_for(request)
     primary_filename = saved[0][0]
     all_filenames = [s[0] for s in saved]
@@ -297,15 +326,15 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
         result["draft"]["source_image_filenames"] = all_filenames
         return result
 
-    analysis = ai_agent.analyze_images([(b64, ct) for _, b64, ct in saved])
-    SESSIONS[primary_filename] = {"analysis": analysis}
+    try:
+        analysis = ai_agent.analyze_images([(b64, ct) for _, b64, ct in saved])
+    except Exception:
+        raise
+    SESSIONS[_session_key(user_id, primary_filename)] = {"analysis": analysis}
     _save_session(user_id, primary_filename)
-    # 2) Fiyat araştırması (web araması)
     price = ai_agent.research_price(analysis)
-    # 3) Kategori eşleştirme
     categories = trendyol.get_leaf_categories()
     category = ai_agent.match_category(analysis, categories)
-    # 4) Kategori özelliklerini doldur
     cat_attrs = trendyol.get_category_attributes(category.category_id)
     filled = ai_agent.fill_attributes(analysis, cat_attrs)
 
@@ -325,6 +354,7 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
         barcode=f"TYA{uuid.uuid4().hex[:10].upper()}",
         stock_code=f"STK-{uuid.uuid4().hex[:8].upper()}",
     )
+    billing.consume_limit(user_id, "ai_listing")
     return {
         "draft": draft.model_dump(),
         "price_examples": price.competitor_examples,
@@ -390,7 +420,7 @@ def generate_image(req: GenerateImageRequest, request: Request):
     if not _ai_available():
         raise HTTPException(503, "Görsel üretimi için GEMINI_API_KEY gerekli (AI şu an demo modda).")
     user_id = _current_user(request)["id"]
-    billing.check_limit(user_id, "image_gen")
+    billing.verify_limit(user_id, "image_gen")
     session = _get_session(user_id, req.image_filename)
     if session is None:
         raise HTTPException(404, "Analiz oturumu bulunamadı — fotoğrafı yeniden analiz et.")
@@ -401,9 +431,7 @@ def generate_image(req: GenerateImageRequest, request: Request):
     if not (0 <= req.scene_index < len(scenes)):
         raise HTTPException(400, "Geçersiz sahne index'i.")
 
-    src = _safe_upload(req.image_filename)
-    if not src.exists():
-        raise HTTPException(404, "Kaynak fotoğraf bulunamadı.")
+    src = _safe_upload(user_id, req.image_filename)
     mime = SUFFIX_TO_MIME.get(src.suffix, "image/jpeg")
     scene = scenes[req.scene_index]
     try:
@@ -412,7 +440,8 @@ def generate_image(req: GenerateImageRequest, request: Request):
         raise HTTPException(502, f"Görsel üretilemedi: {str(e)[:200]}")
 
     filename = f"gen_{uuid.uuid4().hex}.png"
-    (UPLOAD_DIR / filename).write_bytes(image_bytes)
+    (_user_upload_dir(user_id) / filename).write_bytes(image_bytes)
+    billing.consume_limit(user_id, "image_gen")
     return {"filename": filename, "label": scene.label, "scene_index": req.scene_index}
 
 
@@ -501,8 +530,14 @@ def delete_reviews():
     return {"ok": True}
 
 
+def _assistant_ready() -> None:
+    """Asistan uçları — veri yoksa örnek mağaza verisini hazırlar."""
+    ai_seller.ensure_starter_data()
+
+
 @app.get("/api/assistant/stats")
 def assistant_stats(platform: Optional[str] = None):
+    _assistant_ready()
     p = platform or ai_seller.load_settings().get("platform", "trendyol")
     return ai_seller.compute_stats(ai_seller.load_reviews(), p)
 
@@ -510,11 +545,13 @@ def assistant_stats(platform: Optional[str] = None):
 @app.get("/api/assistant/products")
 def assistant_products(platform: Optional[str] = None):
     """Ürün özetleri — resim, yorum örnekleri (otomasyonv3 product_summary)."""
+    _assistant_ready()
     return ai_seller.get_product_summaries(platform)
 
 
 @app.get("/api/assistant/settings")
 def get_assistant_settings():
+    _assistant_ready()
     return ai_seller.load_settings()
 
 
@@ -536,19 +573,27 @@ def delete_assistant_product(sku: str):
 @app.get("/api/assistant/insights")
 def assistant_insights(request: Request, refresh: bool = False):
     """Toplu mağaza analizi — tüm yorumlar birlikte değerlendirilir."""
-    if refresh or not ai_seller._insights_file().exists():
-        billing.check_limit(_current_user(request)["id"], "insight")
+    _assistant_ready()
+    user_id = _current_user(request)["id"]
+    stats = ai_seller.compute_stats(ai_seller.load_reviews(), None)
+    if stats["total_reviews"] > 0 and (refresh or not ai_seller._insights_file().exists()):
+        billing.consume_limit(user_id, "insight")
     return ai_seller.generate_store_insights(force=refresh)
 
 
 @app.post("/api/assistant/ask")
 def assistant_ask(req: AskRequest, request: Request):
     """Mağaza verileri hakkında soru-cevap."""
+    _assistant_ready()
     q = req.question.strip()
     if not q:
         raise HTTPException(400, "Soru boş olamaz.")
-    billing.check_limit(_current_user(request)["id"], "ai_answer")
-    return ai_seller.answer_store_question(q, req.sku)
+    user_id = _current_user(request)["id"]
+    billing.verify_limit(user_id, "ai_answer")
+    result = ai_seller.answer_store_question(q, req.sku)
+    if result.get("source") != "validation":
+        billing.consume_limit(user_id, "ai_answer")
+    return result
 
 
 @app.post("/api/assistant/suggest-reply")
@@ -556,8 +601,11 @@ def assistant_suggest_reply(req: ReplyRequest, request: Request):
     """Tek müşteri yorumuna mağaza cevabı önerir."""
     if not req.comment_text.strip():
         raise HTTPException(400, "Yorum metni boş olamaz.")
-    billing.check_limit(_current_user(request)["id"], "ai_answer")
-    return ai_seller.suggest_reply_for_review(req.model_dump())
+    user_id = _current_user(request)["id"]
+    billing.verify_limit(user_id, "ai_answer")
+    result = ai_seller.suggest_reply_for_review(req.model_dump())
+    billing.consume_limit(user_id, "ai_answer")
+    return result
 
 
 @app.post("/api/assistant/scrape-reviews")
@@ -567,11 +615,6 @@ async def assistant_scrape_reviews(req: ScrapeRequest, request: Request):
 
     user_id = _current_user(request)["id"]
     limit = billing.limit_for(user_id, "review_scrape")
-    if limit != -1 and db.get_usage(user_id, "review_scrape") >= limit:
-        raise HTTPException(
-            402,
-            f"Bu ay için yorum çekme limitine ulaştın ({limit}). Paketini yükselterek devam edebilirsin.",
-        )
     try:
         ai_seller.scrape_url_matches_store(req.url.strip(), ai_seller.load_settings().get("platform", "trendyol"))
         rows, meta = await scrape_reviews_from_url(req.url)
@@ -580,8 +623,16 @@ async def assistant_scrape_reviews(req: ScrapeRequest, request: Request):
     except Exception as e:
         raise HTTPException(502, f"Yorumlar çekilemedi: {str(e)[:200]}")
     if limit != -1:
-        rows = rows[: max(limit - db.get_usage(user_id, "review_scrape"), 0)]
-    db.increment_usage(user_id, "review_scrape", len(rows))
+        remaining = max(limit - db.get_usage(user_id, "review_scrape"), 0)
+        rows = rows[:remaining]
+    if not rows:
+        if limit != -1 and db.get_usage(user_id, "review_scrape") >= limit:
+            raise HTTPException(
+                402,
+                f"Bu ay için yorum çekme limitine ulaştın ({limit}). Paketini yükselterek devam edebilirsin.",
+            )
+        raise HTTPException(400, "Bu linkten yorum alınamadı.")
+    billing.consume_limit(user_id, "review_scrape", len(rows))
     result = ai_seller.add_scraped_reviews([
         {**r, "review_date": str(r.get("review_date") or "")} for r in rows
     ], meta={k: v for k, v in meta.items() if k != "html"})
@@ -654,10 +705,10 @@ def list_shipments(request: Request, status: Optional[str] = None):
     return ai_seller.compute_shipments_stats(status)
 
 
-def _host_image(filename: str) -> str:
+def _host_image(user_id: str, filename: str) -> str:
     """Trendyol herkese açık HTTPS URL ister. IMGBB_API_KEY varsa oraya yükler."""
     imgbb_key = os.getenv("IMGBB_API_KEY")
-    path = _safe_upload(filename)
+    path = _safe_upload(user_id, filename)
     if imgbb_key:
         with httpx.Client(timeout=60) as c:
             r = c.post(
@@ -667,12 +718,12 @@ def _host_image(filename: str) -> str:
             )
             r.raise_for_status()
             return r.json()["data"]["url"]
-    # Host yoksa yerel URL (yalnızca mock modda anlamlı)
     return f"https://localhost-demo/uploads/{filename}"
 
 
 @app.post("/api/publish", response_model=PublishResult)
 def publish(draft: ProductDraft, request: Request):
+    user_id = _current_user(request)["id"]
     trendyol = _trendyol_for(request)
     if draft.list_price < draft.sale_price:
         raise HTTPException(400, "Liste fiyatı satış fiyatından düşük olamaz.")
@@ -691,10 +742,12 @@ def publish(draft: ProductDraft, request: Request):
             f"(markanın Trendyol marka listesinde kayıtlı olması gerekir).",
         )
 
-    image_urls = [_host_image(draft.image_filename)]
+    image_urls = [_host_image(user_id, draft.image_filename)]
     for extra in draft.extra_image_filenames:
-        if (UPLOAD_DIR / extra).exists():
-            image_urls.append(_host_image(extra))
+        try:
+            image_urls.append(_host_image(user_id, extra))
+        except HTTPException:
+            continue
 
     attributes = []
     for a in draft.attributes:
@@ -715,6 +768,7 @@ def publish(draft: ProductDraft, request: Request):
         "categoryId": draft.category_id,
         "quantity": draft.quantity,
         "stockCode": draft.stock_code,
+        "dimensionalWeight": draft.dimensional_weight or 1,  # createProducts V2'de zorunlu
         "description": draft.description_html[:30000],
         "currencyType": draft.currency,
         "listPrice": draft.list_price,

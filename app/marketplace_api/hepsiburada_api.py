@@ -1,13 +1,21 @@
 """Hepsiburada entegrasyon istemcisi.
 
 Dokümantasyon: https://developers.hepsiburada.com
-Auth: Basic (merchant kullanıcı adı + servis şifresi), User-Agent zorunlu.
+Auth: HTTP Basic (merchantId + API key/servis şifresi), User-Agent zorunlu.
+  NOT: Hepsiburada yeni birleşik API'de (https://api.hepsiburada.com) OAuth2
+  (POST /v3/auth, client_credentials -> Bearer) kullanır. Bu istemci, mevcut
+  ve dokümante legacy servisleri (Basic auth) kullanır:
+    Listing (ürün/fiyat/stok):  https://listing-external.hepsiburada.com
+    OMS (sipariş/paket):        https://oms-external.hepsiburada.com
 
-Servisler:
-  Listing (fiyat/stok):  https://listing-external.hepsiburada.com
-  OMS (sipariş/paket):   https://oms-external.hepsiburada.com
-İadeler ve soru-cevap uçları merchant onayı gerektirir; anahtar girilmediyse
-tüm modüller DEMO veriyle çalışır.
+Kapsanan resmi uçlar:
+  Ürünler     GET  /listings/merchantid/{merchantId}
+  Fiyat/Stok  POST /listings/merchantid/{merchantId}/inventory-uploads
+  Siparişler  GET  /packages/merchantid/{merchantId}
+
+Desteklenmeyen (ayrı başvuru/servis gerektirir, herkese açık uç değil):
+  iade (OMS iade servisi), müşteri soru-cevap (MİM), finans/hakediş, buybox.
+Anahtar girilmediyse tüm modüller DEMO veriyle çalışır.
 """
 import base64
 from typing import Any, Optional

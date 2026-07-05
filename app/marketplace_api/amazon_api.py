@@ -2,13 +2,25 @@
 
 Dokümantasyon: https://developer-docs.amazon.com/sp-api
 Auth: Login with Amazon (LWA) refresh token -> access token akışı.
-Bölge: Avrupa (eu-west-1), pazar: A33AVAJ2PDY3EV (amazon.com.tr)
+  ÖNEMLİ: 2 Ekim 2023'ten beri SP-API AWS IAM / SigV4 imzalama GEREKTİRMEZ;
+  her istekte yalnızca x-amz-access-token (LWA) yeterlidir. Bu istemci bu
+  güncel modele uygundur.
+Bölge: Avrupa (sellingpartnerapi-eu), pazar: A33AVAJ2PDY3EV (amazon.com.tr)
 
 Gerekli kimlikler: refresh_token, lwa_client_id, lwa_client_secret, seller_id.
-Kapsanan uçlar:
-  Siparişler  GET /orders/v0/orders
-  Ürünler     GET /listings/2021-08-01/items/{sellerId} (SKU listesi FBA raporundan)
+
+Kapsanan resmi uçlar:
+  Siparişler  GET  /orders/v0/orders  (+ /orderItems)
   Fiyat/Stok  PATCH /listings/2021-08-01/items/{sellerId}/{sku}
+  Finans      GET  /finances/v0/financialEvents
+  Buybox      GET  /products/pricing/v0/items/{ASIN}/offers  (ASIN gerekir, SKU değil)
+
+Kısıtlar (resmi dokümana göre):
+  - Kişisel veri (alıcı adı, teslimat adresi) "restricted operation"dır; bu
+    alanları çekmek için Tokens API'den RDT alınır. Bu istemci sipariş adresi
+    için RDT dener; alınamazsa şehir boş döner (sipariş yine listelenir).
+  - Toplu ürün listesi Reports API (GET_MERCHANT_LISTINGS_ALL_DATA) gerektirir;
+    list_products bu yüzden desteklenmez, fiyat/stok SKU bazında güncellenir.
 """
 import time
 from typing import Any, Optional
@@ -63,11 +75,13 @@ class AmazonAPI(B.MarketplaceClient):
         self._token_expiry = time.time() + int(data.get("expires_in", 3600))
         return self._access_token
 
-    def _req(self, method: str, path: str, *, params: Optional[dict] = None, json: Any = None) -> Any:
+    def _req(self, method: str, path: str, *, params: Optional[dict] = None, json: Any = None,
+             token: Optional[str] = None) -> Any:
         try:
             with httpx.Client(timeout=30) as c:
                 r = c.request(method, f"{SP_BASE}{path}",
-                              headers={"x-amz-access-token": self._token(), "Content-Type": "application/json"},
+                              headers={"x-amz-access-token": token or self._token(),
+                                       "Content-Type": "application/json"},
                               params=params, json=json)
                 r.raise_for_status()
                 return r.json() if r.content else {}
@@ -76,6 +90,19 @@ class AmazonAPI(B.MarketplaceClient):
         except httpx.HTTPError as e:
             raise B.MarketplaceError(f"Amazon bağlantı hatası: {str(e)[:150]}") from e
 
+    def _orders_rdt(self) -> Optional[str]:
+        """Tokens API'den sipariş adresi/alıcı bilgisi için RDT alır (PII kısıtlı işlem).
+        Alınamazsa None döner; sipariş listesi RDT'siz de çalışır ama şehir boş kalır."""
+        try:
+            data = self._req("POST", "/tokens/2021-03-01/restrictedDataToken", json={
+                "restrictedResources": [
+                    {"method": "GET", "path": "/orders/v0/orders",
+                     "dataElements": ["buyerInfo", "shippingAddress"]},
+                ]})
+            return data.get("restrictedDataToken")
+        except B.MarketplaceError:
+            return None
+
     # ---- Siparişler ----
 
     def list_orders(self, status: Optional[str] = None, days: int = 14) -> list[dict]:
@@ -83,9 +110,10 @@ class AmazonAPI(B.MarketplaceClient):
             rows = B.demo_orders("AMZ-")
             return self._tag([r for r in rows if not status or r["status"] == status])
         created_after = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+        rdt = self._orders_rdt()  # adres/alıcı (PII) için; None ise şehir boş kalır
         data = self._req("GET", "/orders/v0/orders",
                          params={"MarketplaceIds": MARKETPLACE_TR, "CreatedAfter": created_after,
-                                 "MaxResultsPerPage": 50})
+                                 "MaxResultsPerPage": 50}, token=rdt)
         rows = []
         # N+1 sorgu riskini sınırla: her sipariş için ayrı API çağrısı yapılıyor;
         # SP-API rate limiti 0.5 req/s olduğundan en fazla 20 sipariş detaylı işlenir.

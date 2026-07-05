@@ -327,27 +327,44 @@ def import_reviews_csv(raw: bytes) -> dict:
         )
     reviews = load_reviews()
     added = 0
+    skipped = 0
+    default_platform = load_settings().get("platform", "trendyol")
+    existing = {
+        (r.get("sku", ""), r.get("review_date", ""), r.get("comment_text", ""))
+        for r in reviews
+    }
     for row in reader:
         try:
             rating = int(float(str(row.get("rating", "")).strip()))
         except ValueError:
             continue
         comment = (row.get("comment_text") or "").strip()
+        sku = (row.get("sku") or "").strip()
+        review_date = (row.get("review_date") or "").strip()
+        key = (sku, review_date, comment)
+        if key in existing:
+            skipped += 1
+            continue
         sentiment, category = classify_review(rating, comment)
         reviews.append({
             "product_name": (row.get("product_name") or "").strip() or "Bilinmeyen ürün",
-            "sku": (row.get("sku") or "").strip(),
+            "sku": sku,
             "rating": max(1, min(5, rating)),
             "comment_text": comment,
-            "review_date": (row.get("review_date") or "").strip(),
+            "review_date": review_date,
             "sentiment": sentiment,
             "complaint_category": category,
+            "platform": default_platform,
         })
+        existing.add(key)
         added += 1
-    if added == 0:
+    if added == 0 and skipped == 0:
         raise ValueError("CSV'den hiç yorum okunamadı — dosya formatını kontrol edin.")
     save_reviews(reviews)
-    return {"added": added, "total": len(reviews)}
+    settings = load_settings()
+    if settings.get("data_cleared"):
+        save_settings({**settings, "data_cleared": False})
+    return {"added": added, "skipped": skipped, "total": len(reviews)}
 
 
 def clear_reviews() -> None:
@@ -357,6 +374,69 @@ def clear_reviews() -> None:
         _insights_file().unlink()
     if _listing_meta_file().exists():
         _listing_meta_file().unlink()
+    save_settings({**load_settings(), "data_cleared": True})
+
+
+def _sample_data_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "sample-data"
+
+
+def seed_sample_data(*, include_orders: bool = False) -> dict:
+    """sample-data/ örnek dosyalarını aktif kullanıcı dizinine yükler."""
+    sample_dir = _sample_data_dir()
+    out: dict = {"reviews": 0, "returns": 0, "shipments": 0, "orders": 0}
+
+    reviews_csv = sample_dir / "yorumlar_ornek.csv"
+    if reviews_csv.exists():
+        try:
+            r = import_reviews_csv(reviews_csv.read_bytes())
+            out["reviews"] = r.get("total", 0)
+        except Exception:
+            logger.exception("Örnek yorum verisi yüklenemedi")
+
+    if not load_returns():
+        returns_csv = sample_dir / "iadeler_ornek.csv"
+        if returns_csv.exists():
+            try:
+                r = import_returns_csv(returns_csv.read_bytes())
+                out["returns"] = r.get("total", 0)
+            except Exception:
+                logger.exception("Örnek iade verisi yüklenemedi")
+
+    if not load_shipments():
+        shipments_csv = sample_dir / "kargolar_ornek.csv"
+        if shipments_csv.exists():
+            try:
+                r = import_shipments_csv(shipments_csv.read_bytes())
+                out["shipments"] = r.get("total", 0)
+            except Exception:
+                logger.exception("Örnek kargo verisi yüklenemedi")
+
+    if include_orders:
+        orders_csv = sample_dir / "siparisler_ornek.csv"
+        if orders_csv.exists():
+            try:
+                from . import analytics as _analytics
+                r = _analytics.import_orders_csv(orders_csv.read_bytes())
+                out["orders"] = r.get("total", r.get("imported", 0))
+            except Exception:
+                logger.exception("Örnek sipariş verisi yüklenemedi")
+
+    settings = load_settings()
+    save_settings({**settings, "starter_seeded": True, "data_cleared": False})
+    return out
+
+
+def ensure_starter_data(*, force: bool = False) -> dict:
+    """Asistan verisi yoksa örnek mağaza verisini otomatik yükler (tüm kullanıcılar)."""
+    if not force:
+        if load_reviews():
+            return {"seeded": False, "reason": "has_data"}
+        if load_settings().get("data_cleared"):
+            return {"seeded": False, "reason": "cleared_by_user"}
+    result = seed_sample_data()
+    seeded = result.get("reviews", 0) > 0
+    return {"seeded": seeded, **result}
 
 
 def load_settings() -> dict:
@@ -455,11 +535,26 @@ def infer_product_platform(sku: str, source_url: str | None = None) -> str | Non
     return None
 
 
-def product_belongs_to_platform(sku: str, source_url: str | None, platform: str) -> bool:
+def product_belongs_to_platform(
+    sku: str, source_url: str | None, platform: str, stored_platform: str | None = None,
+) -> bool:
+    if stored_platform:
+        return stored_platform == platform
     inferred = infer_product_platform(sku, source_url)
     if inferred is None:
         return True
     return inferred == platform
+
+
+def _review_matches_platform(review: dict, platform: str | None) -> bool:
+    if not platform:
+        return True
+    return product_belongs_to_platform(
+        review.get("sku", ""),
+        review.get("source_url"),
+        platform,
+        review.get("platform"),
+    )
 
 
 def scrape_url_matches_store(url: str, store_platform: str) -> None:
@@ -492,6 +587,11 @@ def add_scraped_reviews(rows: list[dict], meta: dict | None = None) -> dict:
     if sku:
         reviews = [r for r in reviews if r.get("sku") != sku]
     added = 0
+    platform = load_settings().get("platform", "trendyol")
+    if meta and meta.get("source_url"):
+        inferred = infer_product_platform(sku, meta.get("source_url"))
+        if inferred:
+            platform = inferred
     for row in rows:
         sentiment, category = classify_review(row["rating"], row["comment_text"])
         reviews.append({
@@ -502,6 +602,8 @@ def add_scraped_reviews(rows: list[dict], meta: dict | None = None) -> dict:
             "review_date": str(row.get("review_date") or ""),
             "sentiment": sentiment,
             "complaint_category": category,
+            "platform": platform,
+            "source_url": (meta or {}).get("source_url"),
         })
         added += 1
     save_reviews(reviews)
@@ -554,9 +656,20 @@ def import_returns_csv(raw: bytes) -> dict:
         )
     returns = load_returns()
     added = 0
+    skipped = 0
+    existing = {
+        (r.get("sku", ""), r.get("return_reason", ""), r.get("return_date", ""))
+        for r in returns
+    }
     for row in reader:
         reason = (row.get("return_reason") or "").strip()
         if not reason:
+            continue
+        sku = (row.get("sku") or "").strip()
+        return_date = (row.get("return_date") or "").strip()
+        key = (sku, reason, return_date)
+        if key in existing:
+            skipped += 1
             continue
         try:
             qty = max(1, int(float(str(row.get("quantity") or "1").strip())))
@@ -564,16 +677,17 @@ def import_returns_csv(raw: bytes) -> dict:
             qty = 1
         returns.append({
             "product_name": (row.get("product_name") or "").strip() or "Bilinmeyen ürün",
-            "sku": (row.get("sku") or "").strip(),
+            "sku": sku,
             "return_reason": reason,
-            "return_date": (row.get("return_date") or "").strip(),
+            "return_date": return_date,
             "quantity": qty,
         })
+        existing.add(key)
         added += 1
-    if added == 0:
+    if added == 0 and skipped == 0:
         raise ValueError("CSV'den hiç iade kaydı okunamadı — dosya formatını kontrol edin.")
     _returns_file().write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"added": added, "total": len(returns)}
+    return {"added": added, "skipped": skipped, "total": len(returns)}
 
 
 def clear_returns() -> None:
@@ -816,8 +930,11 @@ def compute_shipments_stats(status_filter: Optional[str] = None) -> dict:
 
 
 def compute_stats(reviews: list[dict], platform: str | None = None) -> dict:
+    if platform:
+        reviews = [r for r in reviews if _review_matches_platform(r, platform)]
     total = len(reviews)
     negative = sum(1 for r in reviews if r["sentiment"] == "negative")
+    positive = sum(1 for r in reviews if r["sentiment"] == "positive")
     avg = round(sum(r["rating"] for r in reviews) / total, 2) if total else 0
     breakdown: dict[str, int] = {}
     for r in reviews:
@@ -893,7 +1010,9 @@ def compute_stats(reviews: list[dict], platform: str | None = None) -> dict:
         sku_key = p.get("sku") or p["product_name"]
         p["returns"] = return_by_sku.get(sku_key, {"count": 0, "qty": 0})
         p["shipments"] = ship_by_sku.get(sku_key, {"total": 0, "in_transit": 0, "delivered": 0})
-        if platform and not product_belongs_to_platform(p.get("sku", ""), p.get("source_url"), platform):
+        if platform and not product_belongs_to_platform(
+            p.get("sku", ""), p.get("source_url"), platform, p.get("platform"),
+        ):
             continue
         products.append(p)
     products.sort(key=lambda x: -x["total_reviews"])
@@ -908,9 +1027,9 @@ def compute_stats(reviews: list[dict], platform: str | None = None) -> dict:
     filtered_positive = sum(p["positive_reviews"] for p in products)
 
     return {
-        "total_reviews": filtered_total or total,
-        "negative_reviews": filtered_negative or negative,
-        "positive_reviews": filtered_positive or (total - negative),
+        "total_reviews": filtered_total,
+        "negative_reviews": filtered_negative,
+        "positive_reviews": filtered_positive,
         "average_rating": avg,
         "complaint_breakdown": breakdown,
         "products": products,
@@ -960,10 +1079,10 @@ def _fallback_insights(stats: dict) -> dict:
     total = stats["total_reviews"]
     if total == 0:
         return {
-            "general_summary": "Henüz yorum verisi yok. Yorum CSV'si yükledikten sonra analiz oluşturulur.",
+            "general_summary": "Henüz yorum verisi yok. Yorumlar sekmesinden link veya CSV ile veri ekleyebilirsiniz.",
             "main_complaint_topic": "—", "main_complaint_detail": "—",
             "product_highlights": [], "cargo_guide": [], "market_guide": [],
-            "recommendations": ["Önce yorum CSV'nizi yükleyin (product_name, sku, rating, comment_text, review_date)."],
+            "recommendations": ["Yorumlar sekmesinden ürün linki ile çekin veya örnek CSV yükleyin."],
             "avoid_actions": [], "source": "fallback",
         }
     negative = stats["negative_reviews"]
@@ -1012,7 +1131,7 @@ def _norm_list(value, limit: int = 6) -> list[str]:
 def generate_store_insights(force: bool = False) -> dict:
     reviews = load_reviews()
     platform = load_settings().get("platform", "trendyol")
-    stats = compute_stats(reviews, platform)
+    stats = compute_stats(reviews, None)
     if not force and _insights_file().exists():
         cached = json.loads(_insights_file().read_text(encoding="utf-8"))
         cached["cached"] = True
@@ -1034,7 +1153,7 @@ def generate_store_insights(force: bool = False) -> dict:
                                    "average_rating", "top_complaint")}
                 for p in stats["products"][:20]
             ],
-            "platform": "trendyol",
+            "platform": platform,
             "carrier_reference": TRENDYOL_CARRIERS,
             "reviews": [
                 {"product": r["product_name"], "rating": r["rating"], "text": r["comment_text"][:300]}
@@ -1215,21 +1334,66 @@ def _small_talk_response(q: str) -> dict:
     return {"answer": answer, "recommendations": [], "evidence": [], "sorted_complaints": [], "source": "validation"}
 
 
-def _fallback_answer(question: str, stats: dict) -> dict:
+def _fallback_answer(
+    question: str,
+    stats: dict,
+    returns_stats: dict | None = None,
+    shipment_stats: dict | None = None,
+) -> dict:
     total = stats.get("total_reviews", 0)
-    if total == 0:
+    returns_stats = returns_stats or compute_returns_stats()
+    shipment_stats = shipment_stats or compute_shipments_stats()
+
+    if total == 0 and returns_stats["total_returns"] == 0 and shipment_stats["total"] == 0:
         return {
-            "answer": "Henüz yorum verisi yok. Önce Mağaza Asistanı bölümünden yorum CSV'nizi yükleyin.",
-            "recommendations": ["Yorum CSV şablonunu indirip doldurun."],
+            "answer": (
+                "Henüz mağaza verisi yok. Yorumlar sekmesinden ürün linki ile yorum çekebilir "
+                "veya CSV yükleyebilirsiniz — panel açıldığında örnek veri otomatik yüklenir."
+            ),
+            "recommendations": [
+                "Sayfayı yenileyip tekrar deneyin (örnek veri otomatik yüklenir)",
+                "Yorumlar → Link ile çek veya kendi CSV'nizi yükleyin",
+            ],
             "evidence": [], "sorted_complaints": [], "source": "fallback",
         }
+
+    if total == 0 and returns_stats["total_returns"] > 0:
+        top_reason = max(returns_stats["reason_breakdown"].items(), key=lambda x: x[1])[0] if returns_stats["reason_breakdown"] else "genel"
+        return {
+            "answer": (
+                f"Yorum verisi yok; ancak {returns_stats['total_returns']} iade kaydı var "
+                f"({returns_stats['return_quantity']} adet). En sık iade sebebi: {top_reason}."
+            ),
+            "recommendations": [
+                f"'{top_reason}' kaynaklı iadeleri azaltmak için ürün açıklaması ve kalite kontrolünü gözden geçirin.",
+                "Yorum verisi ekleyerek daha detaylı analiz alabilirsiniz.",
+            ],
+            "evidence": [f"{returns_stats['total_returns']} iade kaydı"],
+            "sorted_complaints": [], "source": "fallback",
+        }
+
+    if total == 0 and shipment_stats["total"] > 0:
+        return {
+            "answer": (
+                f"Yorum verisi yok; ancak {shipment_stats['total']} kargo kaydı mevcut "
+                f"({shipment_stats['in_transit']} yolda, {shipment_stats['delivered']} teslim)."
+            ),
+            "recommendations": [
+                "Kargo sürelerini kısaltmak müşteri memnuniyetini artırır.",
+                "Yorum verisi ekleyerek şikayet temalarını daha net görebilirsiniz.",
+            ],
+            "evidence": [f"{shipment_stats['total']} kargo kaydı"],
+            "sorted_complaints": [], "source": "fallback",
+        }
+
     breakdown = stats.get("complaint_breakdown") or {}
     top = max(breakdown.items(), key=lambda x: x[1])[0] if breakdown else "genel"
     label = TOPIC_LABELS.get(top, top)
     return {
         "answer": (
-            f"Yüklediğiniz verilere göre {total} yorum var; "
-            f"%{round(100 * stats['negative_reviews'] / total)} olumsuz. En baskın tema: {label}."
+            f"Mevcut verilere göre {total} yorum var; "
+            f"%{round(100 * stats['negative_reviews'] / total) if total else 0} olumsuz. "
+            f"En baskın tema: {label}."
         ),
         "recommendations": [f"'{label}' konusuna öncelik verin."],
         "evidence": [f"{stats['negative_reviews']} olumsuz yorum"],
@@ -1247,29 +1411,31 @@ def answer_store_question(question: str, sku: str | None = None) -> dict:
             "recommendations": [], "evidence": [], "sorted_complaints": [], "source": "validation",
         }
 
-    platform = load_settings().get("platform", "trendyol")
-    reviews = load_reviews()
-    if sku:
-        reviews = [r for r in reviews if r.get("sku") == sku]
-    stats = compute_stats(reviews, platform)
+    all_reviews = load_reviews()
+    reviews = [r for r in all_reviews if r.get("sku") == sku] if sku else all_reviews
+    stats = compute_stats(reviews, None)
+    returns_stats = compute_returns_stats()
+    shipment_stats = compute_shipments_stats()
 
     if _SMALL_TALK.search(question) and len(question) < 40:
         return _small_talk_response(question)
 
     has_data = (
         stats["total_reviews"] > 0
-        or compute_returns_stats()["total_returns"] > 0
-        or compute_shipments_stats()["total"] > 0
+        or returns_stats["total_returns"] > 0
+        or shipment_stats["total"] > 0
     )
-    if not ai_available() or not has_data:
-        return _fallback_answer(question, stats)
+    if not has_data:
+        return _fallback_answer(question, stats, returns_stats, shipment_stats)
+
+    if not ai_available():
+        return _fallback_answer(question, stats, returns_stats, shipment_stats)
 
     negative_only = any(k in question.lower() for k in _NEGATIVE_KEYWORDS)
-    returns_stats = compute_returns_stats()
-    shipment_stats = compute_shipments_stats()
     payload = {
         "question": question,
         "negative_only_request": negative_only,
+        "platform": load_settings().get("platform", "trendyol"),
         "store_metrics": {
             "total_reviews": stats["total_reviews"],
             "negative_reviews": stats["negative_reviews"],
@@ -1310,11 +1476,11 @@ def answer_store_question(question: str, sku: str | None = None) -> dict:
             "source": "gemini",
         }
         if not result["answer"]:
-            return _fallback_answer(question, stats)
+            return _fallback_answer(question, stats, returns_stats, shipment_stats)
         return result
     except Exception:
         logger.exception("Soru-cevap Gemini hatası")
-        return _fallback_answer(question, stats)
+        return _fallback_answer(question, stats, returns_stats, shipment_stats)
 
 
 # --------------------------------------------------------------- Cevap önerisi
