@@ -1,16 +1,14 @@
 """Destek talepleri — kullanıcı mesajını destek e-postasına iletir."""
-import time
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import auth
+from . import db
 from . import mail
 
 router = APIRouter(prefix="/api/support", tags=["support"])
 
 _COOLDOWN_SEC = 60
-_last_sent: dict[str, float] = {}
 
 
 class SupportMessageRequest(BaseModel):
@@ -19,9 +17,12 @@ class SupportMessageRequest(BaseModel):
 
 
 @router.get("/info")
-def support_info():
+def support_info(request: Request):
+    """Destek bilgisi — sadece giriş yapmış kullanıcılara."""
+    user = auth.get_session_user(request)
+    if not user:
+        raise HTTPException(401, "Oturum gerekli.")
     return {
-        "inbox": mail.SUPPORT_INBOX,
         "mail_configured": mail.is_configured(),
     }
 
@@ -33,11 +34,16 @@ def send_support_message(req: SupportMessageRequest, request: Request):
         raise HTTPException(503, "E-posta servisi yapılandırılmamış — destek mesajı gönderilemiyor.")
 
     uid = user["id"]
-    now = time.time()
-    last = _last_sent.get(uid, 0)
-    if now - last < _COOLDOWN_SEC:
-        wait = int(_COOLDOWN_SEC - (now - last))
-        raise HTTPException(429, f"Yeni mesaj için {wait} saniye bekleyin.")
+    # Cooldown DB'de saklanır — restart ve çoklu worker'da çalışır
+    last_row = db.query_one(
+        "SELECT count FROM usage WHERE user_id=? AND period='support' AND metric='cooldown'",
+        (uid,),
+    )
+    if last_row:
+        elapsed = db.now() - last_row["count"]
+        if elapsed < _COOLDOWN_SEC:
+            wait = int(_COOLDOWN_SEC - elapsed)
+            raise HTTPException(429, f"Yeni mesaj için {wait} saniye bekleyin.")
 
     try:
         mail.send_support_email(
@@ -50,8 +56,13 @@ def send_support_message(req: SupportMessageRequest, request: Request):
     except RuntimeError as e:
         raise HTTPException(502, str(e)) from e
 
-    _last_sent[uid] = now
+    # Gönderim zamanını kaydet (count alanını timestamp olarak kullan)
+    db.execute(
+        "INSERT INTO usage (user_id, period, metric, count) VALUES (?,?,?,?) "
+        "ON CONFLICT(user_id, period, metric) DO UPDATE SET count=excluded.count",
+        (uid, "support", "cooldown", int(db.now())),
+    )
     return {
         "ok": True,
-        "message": f"Mesajın {mail.SUPPORT_INBOX} adresine iletildi. En kısa sürede dönüş yapılacak.",
+        "message": "Mesajın destek ekibine iletildi. En kısa sürede dönüş yapılacak.",
     }

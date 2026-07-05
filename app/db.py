@@ -4,11 +4,14 @@ Harici bağımlılık gerektirmez (standart kütüphane sqlite3). Her çağrıda
 bağlantı açılır; WAL modu sayesinde eşzamanlı okuma/yazma sorunsuz çalışır.
 """
 import json
+import logging
 import sqlite3
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
+
+_logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -72,7 +75,8 @@ CREATE TABLE IF NOT EXISTS email_verification_codes (
     user_id TEXT PRIMARY KEY REFERENCES users(id),
     code TEXT NOT NULL,
     created_at REAL NOT NULL,
-    expires_at REAL NOT NULL
+    expires_at REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -94,6 +98,10 @@ def init_db() -> None:
         if "email_verified_at" not in cols:
             c.execute("ALTER TABLE users ADD COLUMN email_verified_at REAL")
             c.execute("UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL")
+        # Var olan verification_codes tablosuna attempts kolonu ekle
+        vcols = {r[1] for r in c.execute("PRAGMA table_info(email_verification_codes)").fetchall()}
+        if "attempts" not in vcols:
+            c.execute("ALTER TABLE email_verification_codes ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
 
 
 def delete_user_cascade(user_id: str) -> None:
@@ -176,7 +184,28 @@ def increment_usage(user_id: str, metric: str, amount: int = 1) -> int:
         return row["count"]
 
 
-def usage_summary(user_id: str) -> dict[str, int]:
+def check_and_increment_usage(user_id: str, metric: str, limit: int, amount: int = 1) -> tuple:
+    """Atomik kontrol+artır. (geçti, yeni_sayı) döndürür. TOCTOU race condition'u önler."""
+    period = current_period()
+    with _conn() as c:
+        # Önce mevcut sayıyı oku; limit aşılmıyorsa artır
+        row = c.execute(
+            "SELECT count FROM usage WHERE user_id=? AND period=? AND metric=?",
+            (user_id, period, metric),
+        ).fetchone()
+        current = row["count"] if row else 0
+        if current + amount > limit:
+            return False, current
+        c.execute(
+            "INSERT INTO usage (user_id, period, metric, count) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id, period, metric) DO UPDATE SET count = count + ?",
+            (user_id, period, metric, amount, amount),
+        )
+        new_count = current + amount
+    return True, new_count
+
+
+def usage_summary(user_id: str) -> dict:
     rows = query(
         "SELECT metric, count FROM usage WHERE user_id=? AND period=?",
         (user_id, current_period()),

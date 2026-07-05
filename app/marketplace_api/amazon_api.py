@@ -84,9 +84,13 @@ class AmazonAPI(B.MarketplaceClient):
             return self._tag([r for r in rows if not status or r["status"] == status])
         created_after = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
         data = self._req("GET", "/orders/v0/orders",
-                         params={"MarketplaceIds": MARKETPLACE_TR, "CreatedAfter": created_after})
+                         params={"MarketplaceIds": MARKETPLACE_TR, "CreatedAfter": created_after,
+                                 "MaxResultsPerPage": 50})
         rows = []
-        for o in (data.get("payload", {}).get("Orders") or []):
+        # N+1 sorgu riskini sınırla: her sipariş için ayrı API çağrısı yapılıyor;
+        # SP-API rate limiti 0.5 req/s olduğundan en fazla 20 sipariş detaylı işlenir.
+        orders_list = (data.get("payload", {}).get("Orders") or [])[:20]
+        for o in orders_list:
             oid = o.get("AmazonOrderId", "")
             items_data = self._req("GET", f"/orders/v0/orders/{oid}/orderItems")
             items = [{"sku": i.get("SellerSKU", ""), "title": i.get("Title", ""),

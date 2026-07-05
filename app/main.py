@@ -115,40 +115,64 @@ def _trendyol_for(request: Request) -> TrendyolClient:
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 SUFFIX_TO_MIME = {v: k for k, v in ALLOWED_TYPES.items()}
 
-# Analiz sonuçları görsel üretimi / kategori değişikliği için kullanılır.
-# Bellekte tutulur + diske yazılır (uploads/<foto>.meta.json), böylece sunucu
-# yeniden başlasa bile (--reload) oturum kaybolmaz.
-SESSIONS: dict[str, dict] = {}
+# Dosya magic byte imzaları — Content-Type yanıltmagasına karşı
+_MAGIC: list = [
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"RIFF", "image/webp"),   # bytes 8-12 kontrolü aşağıda yapılıyor
+]
+
+
+def _detect_mime(raw: bytes) -> Optional[str]:
+    if len(raw) < 12:
+        return None
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+# Analiz oturumları bellekte + kullanıcı dizininde saklanır.
+# .meta.json dosyaları UPLOAD_DIR yerine USERS_DATA_DIR altında tutulur
+# (herkese açık /uploads/ üzerinden erişilemez).
+SESSIONS: dict = {}
 
 
 def _safe_upload(filename: str) -> Path:
-    """İstemciden gelen dosya adının uploads/ dışına çıkmasını engeller."""
+    """Dosya adının uploads/ dışına çıkmasını engeller."""
     p = (UPLOAD_DIR / filename).resolve()
     if p.parent != UPLOAD_DIR.resolve():
         raise HTTPException(400, "Geçersiz dosya adı.")
     return p
 
 
-def _meta_path(filename: str) -> Path:
-    return _safe_upload(f"{filename}.meta.json")
+def _meta_path(user_id: str, filename: str) -> Path:
+    """Meta dosyaları kullanıcı dizininde saklanır (public /uploads/'tan erişilemez)."""
+    meta_dir = USERS_DATA_DIR / user_id / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(filename).name  # path traversal engelle
+    return meta_dir / f"{safe_name}.meta.json"
 
 
-def _save_session(filename: str) -> None:
+def _save_session(user_id: str, filename: str) -> None:
     s = SESSIONS.get(filename)
     if not s:
         return
     data = {"analysis": s["analysis"].model_dump()}
     if "scenes" in s:
         data["scenes"] = [sc.model_dump() for sc in s["scenes"]]
-    _meta_path(filename).write_text(json.dumps(data, ensure_ascii=False))
+    _meta_path(user_id, filename).write_text(json.dumps(data, ensure_ascii=False))
 
 
-def _get_session(filename: str) -> Optional[dict]:
-    """Önce bellekten, yoksa diskten (sunucu yeniden başlamışsa) oturumu getirir."""
+def _get_session(user_id: str, filename: str) -> Optional[dict]:
+    """Bellekten, yoksa diskten oturumu getirir."""
     s = SESSIONS.get(filename)
     if s:
         return s
-    meta = _meta_path(filename)
+    meta = _meta_path(user_id, filename)
     if not meta.exists():
         return None
     data = json.loads(meta.read_text())
@@ -189,10 +213,11 @@ async def gemini_error_handler(request: Request, exc: genai_errors.APIError):
 
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception):
-    """Beklenmedik hatalarda bile arayüze düz metin yerine JSON döndür."""
+    """Beklenmedik hatalarda JSON döndür, iç detayları istemciye açma."""
+    _logger.exception("Unhandled error %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Sunucu hatası: {type(exc).__name__}: {str(exc)[:300]}"},
+        content={"detail": "Beklenmedik bir sunucu hatası oluştu. Lütfen tekrar deneyin."},
     )
 
 
@@ -235,7 +260,8 @@ def status(request: Request):
         "logged_in": bool(user),
         "email_verified": bool(user and auth.is_email_verified(user)),
         "mail_configured": mail.is_configured(),
-        "mail_provider": mail.provider_name(),
+        # mail_provider sunucu yapılandırması — yalnızca giriş yapılmış kullanıcıya gösterilir
+        **(  {"mail_provider": mail.provider_name()} if user else {} ),
     }
 
 
@@ -246,19 +272,22 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
     if len(files) > 6:
         raise HTTPException(400, "En fazla 6 fotoğraf yükleyebilirsin.")
 
+    user_id = _current_user(request)["id"]
     saved: list[tuple[str, str, str]] = []  # filename, b64, content_type
     for file in files:
-        if file.content_type not in ALLOWED_TYPES:
-            raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
         raw = await file.read()
         if len(raw) > 8 * 1024 * 1024:
             raise HTTPException(400, "Her fotoğraf 8 MB'dan küçük olmalı.")
-        filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[file.content_type]}"
+        # Magic byte doğrulaması — Content-Type yanıltmasına karşı
+        detected = _detect_mime(raw)
+        if detected not in ALLOWED_TYPES:
+            raise HTTPException(400, "Sadece JPEG, PNG veya WebP fotoğraf yükleyebilirsin.")
+        filename = f"{uuid.uuid4().hex}{ALLOWED_TYPES[detected]}"
         (UPLOAD_DIR / filename).write_bytes(raw)
         image_b64 = base64.standard_b64encode(raw).decode()
-        saved.append((filename, image_b64, file.content_type))
+        saved.append((filename, image_b64, detected))
 
-    billing.check_limit(_current_user(request)["id"], "ai_listing")
+    billing.check_limit(user_id, "ai_listing")
     trendyol = _trendyol_for(request)
     primary_filename = saved[0][0]
     all_filenames = [s[0] for s in saved]
@@ -270,7 +299,7 @@ async def analyze(request: Request, files: list[UploadFile] = File(...)):
 
     analysis = ai_agent.analyze_images([(b64, ct) for _, b64, ct in saved])
     SESSIONS[primary_filename] = {"analysis": analysis}
-    _save_session(primary_filename)
+    _save_session(user_id, primary_filename)
     # 2) Fiyat araştırması (web araması)
     price = ai_agent.research_price(analysis)
     # 3) Kategori eşleştirme
@@ -314,6 +343,7 @@ def list_categories(request: Request):
 @app.post("/api/recategorize")
 def recategorize(req: RecategorizeRequest, request: Request):
     """Kullanıcı kategoriyi elle değiştirince yeni kategorinin özelliklerini doldurur."""
+    user_id = _current_user(request)["id"]
     trendyol = _trendyol_for(request)
     categories = trendyol.get_leaf_categories()
     cat = next((c for c in categories if c["id"] == req.category_id), None)
@@ -321,12 +351,11 @@ def recategorize(req: RecategorizeRequest, request: Request):
         raise HTTPException(404, "Kategori bulunamadı.")
 
     cat_attrs = trendyol.get_category_attributes(req.category_id)
-    session = _get_session(req.image_filename)
+    session = _get_session(user_id, req.image_filename)
     if _ai_available() and session:
         filled = ai_agent.fill_attributes(session["analysis"], cat_attrs)
         attributes = [a.model_dump() for a in filled.attributes]
     else:
-        # Demo mod: ilk değerlerle doldur
         attributes = []
         for ca in cat_attrs:
             values = ca.get("attributeValues") or []
@@ -341,32 +370,33 @@ def recategorize(req: RecategorizeRequest, request: Request):
 
 
 @app.post("/api/plan-scenes")
-def plan_scenes(req: SceneRequest):
-    """Ürün tipine uygun 4 satış görseli sahnesi planlar (manken, elde kullanım, açı vb.)."""
+def plan_scenes(req: SceneRequest, request: Request):
+    """Rün tipine uygun 4 satış görseli sahnesi planlar."""
     if not _ai_available():
         raise HTTPException(503, "Görsel üretimi için GEMINI_API_KEY gerekli (AI şu an demo modda).")
-    session = _get_session(req.image_filename)
+    user_id = _current_user(request)["id"]
+    session = _get_session(user_id, req.image_filename)
     if session is None:
         raise HTTPException(404, "Analiz oturumu bulunamadı — fotoğrafı yeniden analiz et.")
     if "scenes" not in session:
         session["scenes"] = ai_agent.plan_scenes(session["analysis"]).scenes
-        _save_session(req.image_filename)
+        _save_session(user_id, req.image_filename)
     return {"scenes": [s.model_dump() for s in session["scenes"]]}
 
 
 @app.post("/api/generate-image")
 def generate_image(req: GenerateImageRequest, request: Request):
-    """Planlanan sahnelerden birini üretir; aynı index ile tekrar çağrılırsa yeniden üretir."""
+    """Planlanan sahnelerden birini üretir."""
     if not _ai_available():
         raise HTTPException(503, "Görsel üretimi için GEMINI_API_KEY gerekli (AI şu an demo modda).")
-    billing.check_limit(_current_user(request)["id"], "image_gen")
-    session = _get_session(req.image_filename)
+    user_id = _current_user(request)["id"]
+    billing.check_limit(user_id, "image_gen")
+    session = _get_session(user_id, req.image_filename)
     if session is None:
         raise HTTPException(404, "Analiz oturumu bulunamadı — fotoğrafı yeniden analiz et.")
     if "scenes" not in session:
-        # Sahne planı yoksa (örn. sunucu yeniden başladı) otomatik yeniden planla
         session["scenes"] = ai_agent.plan_scenes(session["analysis"]).scenes
-        _save_session(req.image_filename)
+        _save_session(user_id, req.image_filename)
     scenes = session["scenes"]
     if not (0 <= req.scene_index < len(scenes)):
         raise HTTPException(400, "Geçersiz sahne index'i.")
@@ -379,7 +409,7 @@ def generate_image(req: GenerateImageRequest, request: Request):
     try:
         image_bytes = ai_agent.generate_marketing_image(src.read_bytes(), mime, scene.prompt)
     except Exception as e:
-        raise HTTPException(502, f"Görsel üretilemedi: {str(e)[:300]}")
+        raise HTTPException(502, f"Görsel üretilemedi: {str(e)[:200]}")
 
     filename = f"gen_{uuid.uuid4().hex}.png"
     (UPLOAD_DIR / filename).write_bytes(image_bytes)
@@ -512,19 +542,21 @@ def assistant_insights(request: Request, refresh: bool = False):
 
 
 @app.post("/api/assistant/ask")
-def assistant_ask(req: AskRequest):
+def assistant_ask(req: AskRequest, request: Request):
     """Mağaza verileri hakkında soru-cevap."""
     q = req.question.strip()
     if not q:
         raise HTTPException(400, "Soru boş olamaz.")
+    billing.check_limit(_current_user(request)["id"], "ai_answer")
     return ai_seller.answer_store_question(q, req.sku)
 
 
 @app.post("/api/assistant/suggest-reply")
-def assistant_suggest_reply(req: ReplyRequest):
+def assistant_suggest_reply(req: ReplyRequest, request: Request):
     """Tek müşteri yorumuna mağaza cevabı önerir."""
     if not req.comment_text.strip():
         raise HTTPException(400, "Yorum metni boş olamaz.")
+    billing.check_limit(_current_user(request)["id"], "ai_answer")
     return ai_seller.suggest_reply_for_review(req.model_dump())
 
 

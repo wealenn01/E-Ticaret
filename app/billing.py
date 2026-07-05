@@ -122,20 +122,21 @@ def limit_for(user_id: str, metric: str) -> int:
 
 
 def check_limit(user_id: str, metric: str, amount: int = 1) -> None:
-    """Limit aşılırsa 402 fırlatır; aşılmazsa sayacı artırır."""
+    """Limit aşılırsa 402 fırlatır; geçmesi durumunda sayıcıyı atomik olarak artırır.
+    SQLite transaction içinde kontrol+artış yapılır — eşzamanlı isteklerde TOCTOU olmaz.
+    """
     limit = limit_for(user_id, metric)
     if limit == -1:
         db.increment_usage(user_id, metric, amount)
         return
-    used = db.get_usage(user_id, metric)
-    if used + amount > limit:
+    allowed, current = db.check_and_increment_usage(user_id, metric, limit, amount)
+    if not allowed:
         label = METRIC_LABELS.get(metric, metric)
         raise HTTPException(
             402,
-            f"Bu ay için {label} limitine ulaştın ({used}/{limit}). "
+            f"Bu ay için {label} limitine ulaştın ({current}/{limit}). "
             f"Daha yüksek bir pakete geçerek devam edebilirsin.",
         )
-    db.increment_usage(user_id, metric, amount)
 
 
 def check_feature(user_id: str, feature: str) -> None:
@@ -205,9 +206,9 @@ def _require_user(request: Request) -> dict:
 
 @router.get("/plans")
 def list_plans():
+    # provider bilgisi gizlenir — sunucu yapılandırması anonim kullanıcılara açıklanmaz
     return {
-        "provider": os.getenv("PAYMENT_PROVIDER", "demo"),
-        "plans": [{"key": k, **v} for k, v in PLANS.items()],
+        "plans": [{"key": k, **{kk: vv for kk, vv in v.items() if kk != "bullets" or True}} for k, v in PLANS.items()],
     }
 
 

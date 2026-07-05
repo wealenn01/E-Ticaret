@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 _TMP = tempfile.mkdtemp()
 os.environ.setdefault("GEMINI_API_KEY", "")
 os.environ.setdefault("RESEND_API_KEY", "")
+os.environ["COOKIE_SECURE"] = "false"  # TestClient HTTP kullanır, secure cookie saklanmaz
 
 import app.db as _db
 _db.DB_PATH = Path(_TMP) / "test.db"
@@ -101,6 +102,8 @@ class TestAuth:
         _logout()
 
     def test_demo_account_creation(self):
+        import app.auth as _a
+        _a._DEMO_LAST.clear()  # test rate limit reset
         r = client.post("/api/auth/demo")
         assert r.status_code == 200
         d = r.json()
@@ -112,6 +115,8 @@ class TestAuth:
         _logout()
 
     def test_demo_data_seeded(self):
+        import app.auth as _a
+        _a._DEMO_LAST.clear()  # test ortamında rate limit sıfırla
         r = client.post("/api/auth/demo")
         assert r.status_code == 200
         stats = client.get("/api/assistant/stats")
@@ -427,7 +432,9 @@ class TestWarehouse:
         assert r.json()["id"] == iid
 
     def test_get_nonexistent(self):
-        assert client.get("/api/warehouse/items/yokolanid").status_code == 404
+        # Geçerli hex formatında ama var olmayan ID (400 değil, 404 dönmeli)
+        fake_id = "a" * 32  # geçerli hex, var olmayan kayıt
+        assert client.get(f"/api/warehouse/items/{fake_id}").status_code == 404
 
     def test_update(self):
         iid = self._save()

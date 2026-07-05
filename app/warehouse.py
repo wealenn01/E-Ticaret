@@ -23,6 +23,18 @@ def _warehouse_dir(user_id: str) -> Path:
     return d
 
 
+def _safe_item_path(uid: str, item_id: str) -> Path:
+    """item_id'nin warehouse dizini dışına çıkmasını engeller (path traversal koruması)."""
+    # item_id yalnızca hex karakterlerinden oluşmalı
+    if not item_id or not all(c in "0123456789abcdefABCDEF" for c in item_id):
+        raise HTTPException(400, "Geçersiz öğe kimliği.")
+    wdir = _warehouse_dir(uid)
+    p = (wdir / f"{item_id}.json").resolve()
+    if p.parent != wdir.resolve():
+        raise HTTPException(400, "Geçersiz öğe kimliği.")
+    return p
+
+
 def _read_item(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -61,7 +73,7 @@ def list_items(request: Request):
 @router.get("/items/{item_id}")
 def get_item(item_id: str, request: Request):
     uid = request.state.user["id"]
-    path = _warehouse_dir(uid) / f"{item_id}.json"
+    path = _safe_item_path(uid, item_id)
     if not path.is_file():
         raise HTTPException(404, "Depo kaydı bulunamadı.")
     return _read_item(path)
@@ -102,7 +114,7 @@ def save_item(req: WarehouseSaveRequest, request: Request):
 def update_item(item_id: str, req: WarehouseSaveRequest, request: Request):
     """Mevcut depo kaydını güncelle."""
     uid = request.state.user["id"]
-    path = _warehouse_dir(uid) / f"{item_id}.json"
+    path = _safe_item_path(uid, item_id)
     if not path.is_file():
         raise HTTPException(404, "Depo kaydı bulunamadı.")
     existing = _read_item(path)
@@ -124,7 +136,7 @@ def update_item(item_id: str, req: WarehouseSaveRequest, request: Request):
 @router.delete("/items/{item_id}")
 def delete_item(item_id: str, request: Request):
     uid = request.state.user["id"]
-    path = _warehouse_dir(uid) / f"{item_id}.json"
+    path = _safe_item_path(uid, item_id)
     if not path.is_file():
         raise HTTPException(404, "Depo kaydı bulunamadı.")
     path.unlink()

@@ -5,6 +5,8 @@
 - E-posta doğrulama: 5 haneli kod (demo hesaplar otomatik doğrulanır).
 """
 import hashlib
+import logging
+import os
 import re
 import secrets
 import shutil
@@ -17,12 +19,24 @@ from pydantic import BaseModel
 from . import db
 from . import mail
 
+_logger = logging.getLogger(__name__)
+
 SESSION_COOKIE = "tya_session"
 SESSION_TTL = 30 * 24 * 3600
 CODE_TTL = 15 * 60
 RESEND_COOLDOWN = 60
 PBKDF2_ROUNDS = 200_000
 DELETE_CONFIRM = "HESABIMI SIL"
+
+# Rate-limit: login (IP bağımsız, e-posta başlı) — bellek içi, sunucu yeniden başlatılınca sıfırlanır
+# (sqlite'a taşımak için ayrı tablo eklenebilir; bu çoğu deployment için yeterli)
+_LOGIN_ATTEMPTS: dict = {}   # email -> (count, window_start)
+_LOGIN_MAX = 10
+_LOGIN_WINDOW = 300  # 5 dakika
+
+# Demo hesap oluşturma hızı — IP başlı
+_DEMO_LAST: dict = {}        # ip -> timestamp
+_DEMO_COOLDOWN = 60          # 60 saniye
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 USERS_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "users"
@@ -111,8 +125,11 @@ def destroy_session(request: Request) -> None:
 
 
 def _set_cookie(response: Response, token: str) -> None:
+    # secure=True HTTPS zorunlu kılar; yerel geliştirmede COOKIE_SECURE=false ile devre dışı bırak.
+    secure = os.getenv("COOKIE_SECURE", "true").lower() != "false"
     response.set_cookie(
-        SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, samesite="lax", path="/",
+        SESSION_COOKIE, token, max_age=SESSION_TTL,
+        httponly=True, samesite="lax", path="/", secure=secure,
     )
 
 
@@ -147,6 +164,7 @@ def send_verification_email_for_user(user: dict) -> dict:
 
 
 def verify_email_by_code(user_id: str, code: str) -> dict:
+    MAX_ATTEMPTS = 5
     code = (code or "").strip()
     if not code:
         raise HTTPException(400, "5 haneli doğrulama kodunu girin.")
@@ -155,11 +173,17 @@ def verify_email_by_code(user_id: str, code: str) -> dict:
     row = db.query_one("SELECT * FROM email_verification_codes WHERE user_id=?", (user_id,))
     if not row:
         raise HTTPException(400, "Doğrulama kodu bulunamadı — yeni kod isteyin.")
+    # Kaba kuvvet koruması: MAX_ATTEMPTS deneme sonrası kodu iptal et
+    if row.get("attempts", 0) >= MAX_ATTEMPTS:
+        db.execute("DELETE FROM email_verification_codes WHERE user_id=?", (user_id,))
+        raise HTTPException(429, "Çok fazla hatalı deneme — yeni kod isteyin (/api/auth/resend-verification).")
     if row["expires_at"] < db.now():
         db.execute("DELETE FROM email_verification_codes WHERE user_id=?", (user_id,))
         raise HTTPException(400, "Kodun süresi dolmuş — yeni kod isteyin.")
     if not secrets.compare_digest(row["code"], code):
-        raise HTTPException(400, "Doğrulama kodu hatalı.")
+        db.execute("UPDATE email_verification_codes SET attempts = attempts + 1 WHERE user_id=?", (user_id,))
+        remaining = MAX_ATTEMPTS - row.get("attempts", 0) - 1
+        raise HTTPException(400, f"Doğrulama kodu hatalı. Kalan deneme: {max(remaining, 0)}")
     db.execute("UPDATE users SET email_verified_at=? WHERE id=?", (db.now(), user_id))
     db.execute("DELETE FROM email_verification_codes WHERE user_id=?", (user_id,))
     user = db.query_one("SELECT email FROM users WHERE id=?", (user_id,))
@@ -238,9 +262,19 @@ def register(req: RegisterRequest, response: Response):
 
 @router.post("/login")
 def login(req: LoginRequest, response: Response):
+    key = req.email.strip().lower()
+    now = db.now()
+    count, window_start = _LOGIN_ATTEMPTS.get(key, (0, now))
+    if now - window_start > _LOGIN_WINDOW:
+        count, window_start = 0, now
+    if count >= _LOGIN_MAX:
+        wait = int(_LOGIN_WINDOW - (now - window_start))
+        raise HTTPException(429, f"Hesap kilitlendi. {wait} saniye sonra tekrar deneyin.")
     user = verify_login(req.email, req.password)
     if not user:
+        _LOGIN_ATTEMPTS[key] = (count + 1, window_start)
         raise HTTPException(401, "E-posta veya parola hatalı.")
+    _LOGIN_ATTEMPTS.pop(key, None)
     token = create_session(user["id"])
     _set_cookie(response, token)
     return public_user(user)
@@ -347,8 +381,16 @@ def _seed_demo_data(user_id: str) -> None:
 
 
 @router.post("/demo")
-def create_demo(response: Response):
+def create_demo(request: Request, response: Response):
     """Tek tıkla demo hesabı — örnek verilerle dolu, e-posta doğrulama gerekmez."""
+    # IP başvuru hızı sınırı: dakikada bir demo hesap
+    client_ip = (request.client.host if request.client else "unknown")
+    now = db.now()
+    if now - _DEMO_LAST.get(client_ip, 0) < _DEMO_COOLDOWN:
+        wait = int(_DEMO_COOLDOWN - (now - _DEMO_LAST[client_ip]))
+        raise HTTPException(429, f"Kısa sürede çok fazla demo hesap isteği. {wait} saniye bekleyin.")
+    _DEMO_LAST[client_ip] = now
+
     db.cleanup_expired_demos()
 
     suffix = secrets.token_hex(4)
