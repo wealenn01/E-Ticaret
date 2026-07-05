@@ -1,9 +1,11 @@
 """FastAPI uygulaması — web arayüzü + analiz ve yayınlama uçları."""
 import base64
 import json
+import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -41,7 +43,22 @@ UPLOAD_DIR = BASE_DIR.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 USERS_DATA_DIR = BASE_DIR.parent / "data" / "users"
 
-app = FastAPI(title="PazarAI — E-Ticaret Satış Asistanı")
+_logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(application):
+    """Uygulama başlarken süresi dolmuş demo hesapları temizle."""
+    try:
+        removed = db.cleanup_expired_demos()
+        if removed:
+            _logger.info("Demo temizlik: %d hesap silindi.", removed)
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(title="PazarAI — E-Ticaret Satış Asistanı", lifespan=_lifespan)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth.router)
@@ -49,15 +66,6 @@ app.include_router(billing.router)
 app.include_router(marketplaces.router)
 app.include_router(analytics.router)
 app.include_router(ops.router)
-
-# Ortam değişkenlerindeki anahtarlar tek kiracılı kullanım için yedek istemcidir;
-# giriş yapan kullanıcı için kendi bağlantısındaki anahtarlar kullanılır.
-env_trendyol = TrendyolClient(
-    seller_id=os.getenv("TRENDYOL_SELLER_ID", ""),
-    api_key=os.getenv("TRENDYOL_API_KEY", ""),
-    api_secret=os.getenv("TRENDYOL_API_SECRET", ""),
-    env=os.getenv("TRENDYOL_ENV", "stage"),
-)
 
 # Oturum gerektirmeyen API yolları
 PUBLIC_API_PREFIXES = (
@@ -88,13 +96,11 @@ def _current_user(request: Request) -> dict:
 
 
 def _trendyol_for(request: Request) -> TrendyolClient:
-    """Kullanıcının kendi Trendyol bağlantısı; yoksa .env istemcisi (o da boşsa mock)."""
+    """Kullanıcının hesabındaki Trendyol bağlantısı; yoksa demo (mock) istemci döner."""
     user = getattr(request.state, "user", None)
     if user:
-        client = marketplaces.trendyol_client_for(user["id"])
-        if not client.mock:
-            return client
-    return env_trendyol
+        return marketplaces.trendyol_client_for(user["id"])
+    return TrendyolClient()
 
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 SUFFIX_TO_MIME = {v: k for k, v in ALLOWED_TYPES.items()}
@@ -203,8 +209,12 @@ def account_page():
 @app.get("/api/status")
 def status(request: Request):
     user = auth.get_session_user(request)
+    trendyol_mode = "demo"
+    if user:
+        c = marketplaces.trendyol_client_for(user["id"])
+        trendyol_mode = c.mode_name
     return {
-        "trendyol_mode": (_trendyol_for(request) if user else env_trendyol).mode_name,
+        "trendyol_mode": trendyol_mode,
         "ai_mode": "live" if _ai_available() else "demo",
         "imgbb_configured": bool(os.getenv("IMGBB_API_KEY")),
         "logged_in": bool(user),

@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS users (
     salt TEXT NOT NULL,
     full_name TEXT DEFAULT '',
     company TEXT DEFAULT '',
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    is_demo INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -81,6 +82,25 @@ def _conn() -> sqlite3.Connection:
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA)
+        # Var olan veritabanlarına kolon ekle (migration)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()}
+        if "is_demo" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN is_demo INTEGER DEFAULT 0")
+
+
+def cleanup_expired_demos() -> int:
+    """Süresi dolmuş (7 günden eski) demo hesapları siler. Döngüsel job veya başlangıçta çağrılır."""
+    cutoff = now() - 7 * 24 * 3600
+    rows = query("SELECT id FROM users WHERE is_demo=1 AND created_at < ?", (cutoff,))
+    for row in rows:
+        uid = row["id"]
+        execute("DELETE FROM usage WHERE user_id=?", (uid,))
+        execute("DELETE FROM connections WHERE user_id=?", (uid,))
+        execute("DELETE FROM payments WHERE user_id=?", (uid,))
+        execute("DELETE FROM subscriptions WHERE user_id=?", (uid,))
+        execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        execute("DELETE FROM users WHERE id=?", (uid,))
+    return len(rows)
 
 
 def query(sql: str, params: tuple = ()) -> list[dict]:

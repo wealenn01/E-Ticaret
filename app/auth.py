@@ -156,3 +156,81 @@ def me(request: Request):
     if not user:
         raise HTTPException(401, "Oturum bulunamadı.")
     return public_user(user)
+
+
+# ---- Demo hesap oluşturma (ayrı akış) ----
+
+def _seed_demo_data(user_id: str) -> None:
+    """Yeni demo hesabına örnek CSV verilerini yükler."""
+    import csv as csv_mod
+    from pathlib import Path as _Path
+
+    sample_dir = _Path(__file__).resolve().parent.parent / "sample-data"
+    users_data_dir = _Path(__file__).resolve().parent.parent / "data" / "users" / user_id
+    users_data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Yorumlar
+    reviews_csv = sample_dir / "yorumlar_ornek.csv"
+    if reviews_csv.exists():
+        try:
+            from . import ai_seller as _ai_seller
+            _ai_seller.set_user_dir(users_data_dir)
+            _ai_seller.import_reviews_csv(reviews_csv.read_bytes())
+        except Exception:
+            pass
+
+    # İadeler
+    returns_csv = sample_dir / "iadeler_ornek.csv"
+    if returns_csv.exists():
+        try:
+            from . import ai_seller as _ai_seller
+            _ai_seller.set_user_dir(users_data_dir)
+            _ai_seller.import_returns_csv(returns_csv.read_bytes())
+        except Exception:
+            pass
+
+    # Kargolar
+    shipments_csv = sample_dir / "kargolar_ornek.csv"
+    if shipments_csv.exists():
+        try:
+            from . import ai_seller as _ai_seller
+            _ai_seller.set_user_dir(users_data_dir)
+            _ai_seller.import_shipments_csv(shipments_csv.read_bytes())
+        except Exception:
+            pass
+
+    # Siparişler (analitik için)
+    orders_csv = sample_dir / "siparisler_ornek.csv"
+    if orders_csv.exists():
+        try:
+            from . import ai_seller as _ai_seller
+            from . import analytics as _analytics
+            _ai_seller.set_user_dir(users_data_dir)
+            _analytics.import_orders_csv(orders_csv.read_bytes())
+        except Exception:
+            pass
+
+
+@router.post("/demo")
+def create_demo(response: Response):
+    """Tek tıkla demo hesabı oluşturur — örnek verilerle önceden doldurulmuş.
+    Demo hesaplar 7 gün sonra otomatik silinir."""
+    from . import db as _db
+
+    # Süresi dolmuş demoları temizle
+    _db.cleanup_expired_demos()
+
+    suffix = secrets.token_hex(4)
+    email = f"demo_{suffix}@trendyolai.demo"
+    password = secrets.token_urlsafe(12)
+
+    user = create_user(email, password, full_name="Demo Kullanıcı", company="Demo Mağaza")
+    _db.execute("UPDATE users SET is_demo=1 WHERE id=?", (user["id"],))
+
+    # Örnek verileri yükle
+    _seed_demo_data(user["id"])
+
+    token = create_session(user["id"])
+    _set_cookie(response, token)
+    full = _db.query_one("SELECT * FROM users WHERE id=?", (user["id"],))
+    return {**public_user(full), "demo_email": email, "demo_password": password, "demo": True}

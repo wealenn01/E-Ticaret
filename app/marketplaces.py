@@ -107,8 +107,84 @@ def trendyol_client_for(user_id: str) -> TrendyolClient:
     return TrendyolClient()
 
 
+def _test_hepsiburada(creds: dict) -> tuple[str, str]:
+    """Hepsiburada kimlik bilgilerini Listing API ile doğrular."""
+    import base64 as _b64
+    merchant_id = str(creds.get("merchant_id", "") or "")
+    username = str(creds.get("username", "") or merchant_id)
+    password = str(creds.get("api_key", "") or creds.get("password", "") or "")
+    if not merchant_id or not password:
+        return "unverified", "Merchant ID veya Servis Şifresi eksik — bağlantı kaydedildi ama doğrulanamadı."
+    token = _b64.b64encode(f"{username}:{password}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {token}",
+        "User-Agent": merchant_id,
+        "Accept": "application/json",
+    }
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.get(
+                f"https://listing-external.hepsiburada.com/listings/merchantid/{merchant_id}",
+                headers=headers, params={"offset": 0, "limit": 1},
+            )
+            if r.status_code == 200:
+                total = r.json().get("totalCount", "?")
+                return "active", f"Bağlantı doğrulandı — {total} ürün erişilebilir."
+            if r.status_code in (401, 403):
+                return "error", "Kimlik doğrulama başarısız (401/403) — Merchant ID ve Servis Şifresini kontrol et."
+            return "unverified", f"API {r.status_code} döndürdü — anahtarlar kaydedildi."
+    except Exception as e:
+        return "unverified", f"Bağlantı test edilemedi: {str(e)[:120]} — anahtarlar kaydedildi."
+
+
+def _test_n11(creds: dict) -> tuple[str, str]:
+    """N11 kimlik bilgilerini REST API ile doğrular."""
+    app_key = str(creds.get("api_key", "") or "")
+    app_secret = str(creds.get("api_secret", "") or "")
+    if not app_key or not app_secret:
+        return "unverified", "App Key veya App Secret eksik — bağlantı kaydedildi ama doğrulanamadı."
+    headers = {"appkey": app_key, "appsecret": app_secret, "Content-Type": "application/json"}
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.get("https://api.n11.com/ms/product-query", headers=headers,
+                      params={"page": 0, "size": 1})
+            if r.status_code == 200:
+                total = r.json().get("totalElements", r.json().get("total", "?"))
+                return "active", f"Bağlantı doğrulandı — {total} ürün erişilebilir."
+            if r.status_code in (401, 403):
+                return "error", "Kimlik doğrulama başarısız (401/403) — App Key ve App Secret'ı kontrol et."
+            return "unverified", f"N11 API {r.status_code} döndürdü — anahtarlar kaydedildi."
+    except Exception as e:
+        return "unverified", f"Bağlantı test edilemedi: {str(e)[:120]} — anahtarlar kaydedildi."
+
+
+def _test_amazon(creds: dict) -> tuple[str, str]:
+    """Amazon LWA token alarak SP-API kimliklerini doğrular."""
+    refresh_token = str(creds.get("refresh_token", "") or "")
+    client_id = str(creds.get("lwa_client_id", "") or "")
+    client_secret = str(creds.get("lwa_client_secret", "") or "")
+    if not refresh_token or not client_id or not client_secret:
+        return "unverified", "SP-API kimlik bilgileri eksik — bağlantı kaydedildi ama doğrulanamadı."
+    try:
+        with httpx.Client(timeout=15) as c:
+            r = c.post("https://api.amazon.com/auth/o2/token", data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            })
+            if r.status_code == 200 and r.json().get("access_token"):
+                return "active", "Amazon SP-API kimlik doğrulaması başarılı."
+            if r.status_code in (400, 401):
+                err = r.json().get("error_description", r.json().get("error", ""))
+                return "error", f"Amazon kimlik doğrulama başarısız: {err[:120]}"
+            return "unverified", f"Amazon LWA {r.status_code} döndürdü — anahtarlar kaydedildi."
+    except Exception as e:
+        return "unverified", f"Bağlantı test edilemedi: {str(e)[:120]} — anahtarlar kaydedildi."
+
+
 def _test_connection(platform: str, creds: dict) -> tuple[str, str]:
-    """(status, message) döner. Yalnızca Trendyol canlı doğrulanabilir."""
+    """(status, message) döner; her platform gerçek API çağrısıyla doğrulanır."""
     if platform == "trendyol":
         client = TrendyolClient(
             seller_id=str(creds.get("seller_id", "")),
@@ -119,17 +195,27 @@ def _test_connection(platform: str, creds: dict) -> tuple[str, str]:
         if client.mock:
             return "unverified", "Anahtarlar eksik — bağlantı kaydedildi ama doğrulanamadı."
         try:
-            cats = client.get_leaf_categories()
-            if cats:
-                return "active", f"Bağlantı doğrulandı — {len(cats)} kategori erişilebilir."
-            return "error", "API yanıt verdi ama kategori listesi boş döndü."
+            # Kimlik doğrulaması gerektiren authenticated endpoint'i test et
+            from app.marketplace_api.trendyol_api import TrendyolAPI
+            api = TrendyolAPI(creds)
+            products = api._req("GET", f"/product/sellers/{client.seller_id}/products",
+                                params={"page": 0, "size": 1})
+            count = products.get("totalElements", products.get("content", []))
+            if isinstance(count, list):
+                count = "?"
+            return "active", f"Bağlantı doğrulandı — Satıcı ID geçerli, ürünler erişilebilir ({count} ürün)."
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (401, 403):
                 return "error", "API anahtarları reddedildi (401/403) — Satıcı Paneli > Entegrasyon Bilgileri'nden kontrol et."
             return "error", f"Trendyol API hatası: {e.response.status_code}"
         except Exception as e:
             return "error", f"Bağlantı kurulamadı: {str(e)[:150]}"
-    # Diğer platformlar: kayıt bazlı (API doğrulaması eklenene kadar)
+    if platform == "hepsiburada":
+        return _test_hepsiburada(creds)
+    if platform == "n11":
+        return _test_n11(creds)
+    if platform == "amazon":
+        return _test_amazon(creds)
     return "active", "Bağlantı kaydedildi — yorum çekme ve CSV analizi bu mağaza için aktif."
 
 
