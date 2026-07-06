@@ -84,14 +84,27 @@ CREATE TABLE IF NOT EXISTS email_verification_codes (
 def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(DB_PATH, timeout=15)
     c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")
+    # WAL kalıcıdır (init_db'de bir kez açılır); burada tekrar yazmaya gerek yok.
+    # synchronous=NORMAL WAL'de güvenlidir ve yazma gecikmesini azaltır;
+    # busy_timeout eşzamanlı yazmalarda "database is locked" hatasını önler.
     c.execute("PRAGMA foreign_keys=ON")
+    c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA busy_timeout=15000")
     return c
 
 
 def init_db() -> None:
     with _conn() as c:
+        # WAL kalıcı bir ayardır; veritabanı başına bir kez etkinleştirmek yeterli.
+        c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
+        # user_id ile sık filtrelenen tablolara indeks (küçük tablolar için bile ucuz).
+        c.executescript(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);"
+            "CREATE INDEX IF NOT EXISTS idx_connections_user ON connections(user_id);"
+            "CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);"
+            "CREATE INDEX IF NOT EXISTS idx_usage_user ON usage(user_id, period);"
+        )
         cols = {r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()}
         if "is_demo" not in cols:
             c.execute("ALTER TABLE users ADD COLUMN is_demo INTEGER DEFAULT 0")

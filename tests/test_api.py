@@ -277,6 +277,41 @@ class TestOps:
     def test_claims(self):
         assert client.get("/api/mp/claims").status_code == 200
 
+    def test_claim_review_demo(self):
+        claims = client.get("/api/mp/claims").json().get("rows", [])
+        if not claims:
+            return
+        c = claims[0]
+        r = client.post("/api/mp/claims/review", json={
+            "platform": c.get("platform", "trendyol"),
+            "claim_id": c.get("claim_id", "demo-1"),
+            "approve": True,
+            "reason": "",
+            "claim_item_ids": c.get("claim_item_ids") or [],
+        })
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+
+    def test_claim_review_bad_status_is_400_not_502(self):
+        from unittest.mock import patch
+        from app.marketplace_api.base import MarketplaceError
+        from app.marketplace_api import clients_for_user
+
+        uid = _db.query_one("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")["id"]
+        with patch("app.ops._clients") as mock_clients:
+            mock_client = mock_clients.return_value[0]
+            mock_client.review_claim.side_effect = MarketplaceError(
+                "Bu iade için itiraz oluşturulamaz."
+            )
+            r = client.post("/api/mp/claims/review", json={
+                "platform": "trendyol",
+                "claim_id": "x",
+                "approve": False,
+                "reason": "test",
+            })
+        assert r.status_code == 400, r.text
+        assert "itiraz" in r.json().get("detail", "").lower()
+
     def test_settings(self):
         assert client.get("/api/mp/settings").json()["low_stock_threshold"] == 5
         client.post("/api/mp/settings", json={"low_stock_threshold": 10})
@@ -606,3 +641,110 @@ class TestAnalytics:
 
     def test_stats_requires_pro(self):
         assert client.get("/api/analytics/stats").status_code == 402
+
+    def test_insights_requires_pro(self):
+        assert client.get("/api/analytics/insights").status_code == 402
+
+    def test_delete_orders(self):
+        r = client.delete("/api/analytics/orders")
+        assert r.status_code in (200, 402)
+
+
+class TestEndpointSmoke:
+    """Tüm uçların sunucu hatası (5xx) vermeden yanıt verdiğini doğrular.
+
+    Ücretsiz planda bazı uçlar 402 (paket kısıtı) veya 503 (AI/e-posta yok)
+    döndürebilir; bunlar beklenen kullanıcı-dostu yanıtlardır, hata değildir.
+    Amaç: hiçbir uç 500/502 gibi sunucu hatası vermemeli.
+    """
+    def setup_method(self):
+        _register(f"smoke_{_uid()}@x.com")
+
+    def teardown_method(self):
+        _logout()
+
+    def _ok(self, r, ctx):
+        assert r.status_code < 500, f"{ctx} → {r.status_code}: {r.text[:200]}"
+
+    def test_all_get_endpoints(self):
+        gets = [
+            "/api/status",
+            "/api/auth/me",
+            "/api/categories",
+            "/api/mp/overview", "/api/mp/orders", "/api/mp/products",
+            "/api/mp/questions", "/api/mp/claims", "/api/mp/finance",
+            "/api/mp/buybox", "/api/mp/webhooks", "/api/mp/settings",
+            "/api/mp/orders?status=Delivered", "/api/mp/products?platform=trendyol",
+            "/api/assistant/stats", "/api/assistant/products",
+            "/api/assistant/settings", "/api/assistant/insights",
+            "/api/assistant/presets", "/api/assistant/returns-insights",
+            "/api/assistant/shipments",
+            "/api/analytics/stats", "/api/analytics/insights",
+            "/api/billing/plans", "/api/billing/subscription", "/api/billing/invoices",
+            "/api/connections", "/api/connections/platforms",
+            "/api/warehouse/items", "/api/support/info",
+        ]
+        for path in gets:
+            self._ok(client.get(path), f"GET {path}")
+
+    def test_mp_write_endpoints(self):
+        self._ok(client.post("/api/mp/settings", json={"low_stock_threshold": 8}), "POST /api/mp/settings")
+        self._ok(client.post("/api/mp/price-stock", json={
+            "platform": "trendyol", "items": [{"sku": "SKU-1", "price": 199.9, "stock": 10}]
+        }), "POST /api/mp/price-stock")
+        self._ok(client.post("/api/mp/questions/suggest", json={
+            "question": "Kargo ne zaman gelir?", "product": "Kupa"
+        }), "POST /api/mp/questions/suggest")
+        self._ok(client.post("/api/mp/buybox", json={
+            "platform": "trendyol", "sku_or_url": "SKU-1", "label": "Test"
+        }), "POST /api/mp/buybox")
+        self._ok(client.post("/api/mp/pricing/suggest", json={
+            "platform": "trendyol", "sku_or_url": "SKU-1", "cost": 50.0
+        }), "POST /api/mp/pricing/suggest")
+        self._ok(client.post("/api/mp/webhooks", json={
+            "platform": "trendyol", "url": "https://example.com/hook", "events": ["CREATED"]
+        }), "POST /api/mp/webhooks")
+
+    def test_webhook_bad_url_rejected(self):
+        r = client.post("/api/mp/webhooks", json={"platform": "trendyol", "url": "http://insecure"})
+        assert r.status_code == 400
+
+    def test_assistant_write_endpoints(self):
+        self._ok(client.post("/api/assistant/settings", json={
+            "platform": "trendyol", "seller_model": "reseller"
+        }), "POST /api/assistant/settings")
+        self._ok(client.post("/api/assistant/ask", json={"question": "En çok şikayet ne?"}), "POST /api/assistant/ask")
+        self._ok(client.post("/api/assistant/suggest-reply", json={
+            "product_name": "Kupa", "rating": 2, "comment_text": "Kırık geldi"
+        }), "POST /api/assistant/suggest-reply")
+        self._ok(client.post("/api/assistant/seed-demo-store", json={}), "POST /api/assistant/seed-demo-store")
+
+    def test_seed_demo_store_seeds_reviews(self):
+        r = client.post("/api/assistant/seed-demo-store", json={})
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+        stats = client.get("/api/assistant/stats").json()
+        assert stats.get("total_reviews", 0) > 0
+
+    def test_billing_checkout_free(self):
+        r = client.post("/api/billing/checkout", json={"plan": "free"})
+        self._ok(r, "POST /api/billing/checkout free")
+
+    def test_connection_lifecycle(self):
+        r = client.post("/api/connections", json={
+            "platform": "trendyol",
+            "credentials": {"seller_id": "2738", "api_key": "k", "api_secret": "s", "env": "stage"},
+        })
+        self._ok(r, "POST /api/connections")
+        conn_id = r.json()["connection"]["id"]
+        self._ok(client.post(f"/api/connections/{conn_id}/test", json={}), "POST test connection")
+        self._ok(client.put(f"/api/connections/{conn_id}", json={
+            "platform": "trendyol", "label": "Güncel",
+            "credentials": {"seller_id": "2738", "api_key": "k2", "api_secret": "s2", "env": "stage"},
+        }), "PUT connection")
+        r2 = client.delete(f"/api/connections/{conn_id}")
+        self._ok(r2, "DELETE connection")
+
+    def test_recategorize_missing_session_is_client_error(self):
+        r = client.post("/api/recategorize", json={"image_filename": "yok.jpg", "category_id": 411})
+        assert r.status_code < 500

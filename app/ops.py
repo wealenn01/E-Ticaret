@@ -5,7 +5,10 @@ Tüm uçlar kullanıcının bağlı mağazalarındaki verileri normalize edip bi
 Bağlantı anahtarları girilmemişse istemciler DEMO veriyle çalışır; arayüz aynıdır.
 """
 import json
+import threading
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -16,6 +19,42 @@ from . import ai_seller, db
 from .marketplace_api import MarketplaceError, NotSupported, client_for, clients_for_user
 
 router = APIRouter(prefix="/api/mp", tags=["marketplace-ops"])
+
+# --- Pazaryeri okuma önbelleği ---
+# Pazaryeri API çağrıları yavaştır (ör. Trendyol iade listesi ~1.8s). Görünümler
+# arası gezinmede aynı veriyi tekrar tekrar çekmemek için kısa ömürlü TTL önbellek
+# kullanılır. Yazma işlemleri (fiyat/stok, iade kararı, cevap) ilgili anahtarı boşaltır.
+_MP_TTL = 45.0
+_mp_cache: dict = {}
+_mp_lock = threading.Lock()
+
+
+def _cache_key(user_id: str, platform: str, fn_name: str, args, kwargs):
+    return (user_id, platform, fn_name, repr(args), repr(sorted(kwargs.items())))
+
+
+def _client_fetch(user_id: str, client, fn_name: str, *args, **kwargs):
+    """Tek istemciden TTL önbellekli veri çeker. Hataları çağırana yükseltir."""
+    key = _cache_key(user_id, client.platform, fn_name, args, kwargs)
+    now = time.time()
+    with _mp_lock:
+        hit = _mp_cache.get(key)
+        if hit and now - hit[0] < _MP_TTL:
+            return hit[1]
+    rows = getattr(client, fn_name)(*args, **kwargs)
+    with _mp_lock:
+        _mp_cache[key] = (now, rows)
+    return rows
+
+
+def invalidate_mp_cache(user_id: str, platform: Optional[str] = None, fn_name: Optional[str] = None) -> None:
+    """Yazma sonrası bayat veriyi temizler."""
+    with _mp_lock:
+        for k in list(_mp_cache):
+            if (k[0] == user_id
+                    and (platform is None or k[1] == platform)
+                    and (fn_name is None or k[2] == fn_name)):
+                _mp_cache.pop(k, None)
 
 
 def _user(request: Request) -> dict:
@@ -34,12 +73,12 @@ def _clients(request: Request, platform: Optional[str] = None):
     return clients
 
 
-def _collect(clients, fn_name: str, *args, **kwargs) -> dict:
-    """Tüm istemcilerden veri toplar; desteklemeyen/hata veren platformları not eder."""
+def _collect(user_id: str, clients, fn_name: str, *args, **kwargs) -> dict:
+    """Tüm istemcilerden (önbellekli) veri toplar; hata veren platformları not eder."""
     rows, notes = [], []
     for c in clients:
         try:
-            rows.extend(getattr(c, fn_name)(*args, **kwargs))
+            rows.extend(_client_fetch(user_id, c, fn_name, *args, **kwargs))
         except NotSupported as e:
             notes.append({"platform": c.platform, "detail": str(e)})
         except MarketplaceError as e:
@@ -84,12 +123,18 @@ def save_settings(req: OpsSettingsRequest, request: Request):
 
 @router.get("/overview")
 def overview(request: Request):
+    uid = _user(request)["id"]
     clients = _clients(request)
     days_window = 30
-    orders = _collect(clients, "list_orders", days=days_window)
-    products = _collect(clients, "list_products")
-    questions = _collect(clients, "list_questions")
-    claims = _collect(clients, "list_claims")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_orders = ex.submit(_collect, uid, clients, "list_orders", days=days_window)
+        f_products = ex.submit(_collect, uid, clients, "list_products")
+        f_questions = ex.submit(_collect, uid, clients, "list_questions")
+        f_claims = ex.submit(_collect, uid, clients, "list_claims")
+        orders = f_orders.result()
+        products = f_products.result()
+        questions = f_questions.result()
+        claims = f_claims.result()
     threshold = load_ops_settings()["low_stock_threshold"]
     orders_rows = orders["rows"]
 
@@ -203,7 +248,8 @@ def overview(request: Request):
 
 @router.get("/orders")
 def orders(request: Request, status: Optional[str] = None, platform: Optional[str] = None, days: int = 14):
-    result = _collect(_clients(request, platform), "list_orders", status=status, days=days)
+    uid = _user(request)["id"]
+    result = _collect(uid, _clients(request, platform), "list_orders", status=status, days=days)
     result["rows"].sort(key=lambda o: o.get("date", ""), reverse=True)
     return result
 
@@ -212,7 +258,8 @@ def orders(request: Request, status: Optional[str] = None, platform: Optional[st
 
 @router.get("/products")
 def products(request: Request, platform: Optional[str] = None):
-    result = _collect(_clients(request, platform), "list_products")
+    uid = _user(request)["id"]
+    result = _collect(uid, _clients(request, platform), "list_products")
     threshold = load_ops_settings()["low_stock_threshold"]
     for p in result["rows"]:
         p["low_stock"] = p["stock"] <= threshold
@@ -229,9 +276,12 @@ class PriceStockRequest(BaseModel):
 def price_stock(req: PriceStockRequest, request: Request):
     if not req.items:
         raise HTTPException(400, "Güncellenecek ürün yok.")
+    uid = _user(request)["id"]
     client = _clients(request, req.platform)[0]
     try:
-        return client.update_price_stock(req.items)
+        result = client.update_price_stock(req.items)
+        invalidate_mp_cache(uid, req.platform, "list_products")
+        return result
     except (NotSupported, MarketplaceError) as e:
         raise HTTPException(502, str(e))
 
@@ -240,7 +290,8 @@ def price_stock(req: PriceStockRequest, request: Request):
 
 @router.get("/questions")
 def questions(request: Request, status: Optional[str] = None, platform: Optional[str] = None):
-    result = _collect(_clients(request, platform), "list_questions", status=status)
+    uid = _user(request)["id"]
+    result = _collect(uid, _clients(request, platform), "list_questions", status=status)
     result["rows"].sort(key=lambda q: (q["status"] != "WAITING_FOR_ANSWER", q.get("date", "")), reverse=False)
     return result
 
@@ -283,9 +334,12 @@ class AnswerRequest(BaseModel):
 def answer(req: AnswerRequest, request: Request):
     if len(req.text.strip()) < 10:
         raise HTTPException(400, "Cevap en az 10 karakter olmalı.")
+    uid = _user(request)["id"]
     client = _clients(request, req.platform)[0]
     try:
-        return client.answer_question(req.question_id, req.text.strip())
+        result = client.answer_question(req.question_id, req.text.strip())
+        invalidate_mp_cache(uid, req.platform, "list_questions")
+        return result
     except (NotSupported, MarketplaceError) as e:
         raise HTTPException(502, str(e))
 
@@ -294,7 +348,8 @@ def answer(req: AnswerRequest, request: Request):
 
 @router.get("/claims")
 def claims(request: Request, platform: Optional[str] = None):
-    result = _collect(_clients(request, platform), "list_claims")
+    uid = _user(request)["id"]
+    result = _collect(uid, _clients(request, platform), "list_claims")
     result["rows"].sort(key=lambda c: c.get("date", ""), reverse=True)
     return result
 
@@ -304,15 +359,25 @@ class ClaimReviewRequest(BaseModel):
     claim_id: str
     approve: bool
     reason: str = ""
+    claim_item_ids: Optional[list[str]] = None
 
 
 @router.post("/claims/review")
 def review_claim(req: ClaimReviewRequest, request: Request):
+    uid = _user(request)["id"]
     client = _clients(request, req.platform)[0]
     try:
-        return client.review_claim(req.claim_id, req.approve, req.reason)
-    except (NotSupported, MarketplaceError) as e:
-        raise HTTPException(502, str(e))
+        result = client.review_claim(
+            req.claim_id, req.approve, req.reason, claim_item_ids=req.claim_item_ids
+        )
+        invalidate_mp_cache(uid, req.platform, "list_claims")
+        return result
+    except NotSupported as e:
+        raise HTTPException(400, str(e))
+    except MarketplaceError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"İade işlemi tamamlanamadı: {str(e)[:200]}")
 
 
 # ---- finans ----

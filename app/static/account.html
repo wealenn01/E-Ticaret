@@ -151,7 +151,7 @@
 
   <div class="card">
     <h2>🔗 Pazaryeri Bağlantıları</h2>
-    <p class="muted" style="margin-bottom:14px">Mağazanı bağla — Trendyol API ile canlı doğrulanır; diğer platformlarda yorum çekme ve CSV analizi hemen çalışır.</p>
+    <p class="muted" style="margin-bottom:14px">Mağazanı bağla — API bilgilerini girdiğinde bağlantı otomatik doğrulanır.</p>
     <div id="connList"></div>
     <button class="btn primary" onclick="openConnModal()">+ Mağaza Bağla</button>
   </div>
@@ -181,7 +181,7 @@
       <div><label>Son kullanma (AA/YY)</label><input id="c_exp" placeholder="12/28" maxlength="5"></div>
       <div><label>CVC</label><input id="c_cvc" placeholder="123" maxlength="4" inputmode="numeric"></div>
     </div>
-    <div class="note">🔒 Demo ödeme modu: kart doğrulanır ama gerçek para çekilmez. Canlıya geçerken iyzico/Stripe anahtarı bağlanır. Test kartı: 4242 4242 4242 4242</div>
+    <div class="note">🔒 Deneme ödeme modu: kart bilgileriniz doğrulanır ama gerçek tahsilat yapılmaz. Güvenli ödeme altyapısı canlıya geçişte devreye alınır. Test kartı: 4242 4242 4242 4242</div>
     <div class="err" id="payErr"></div>
     <div style="display:flex; gap:10px; margin-top:18px">
       <button class="btn primary" style="flex:1" id="payBtn" onclick="doCheckout()">Ödemeyi Tamamla</button>
@@ -214,6 +214,8 @@
 
 <script>
 const $ = id => document.getElementById(id);
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
 function toast(msg, ok = false) {
   const t = document.createElement('div');
   t.className = 'toast' + (ok ? ' ok' : '');
@@ -346,12 +348,12 @@ async function loadConns() {
   const [conns, plats] = await Promise.all([api('/api/connections'), platforms.length ? platforms : api('/api/connections/platforms')]);
   platforms = plats;
   $('connList').innerHTML = conns.length ? conns.map(c => {
-    const stTxt = { active: '● bağlı', error: '● hata', unverified: '● doğrulanmadı' }[c.status] || c.status;
+    const stTxt = { active: '● bağlı', error: '● hata', unverified: '● doğrulanmadı' }[c.status] || esc(c.status);
     return '<div class="conn">' +
-      '<div class="logo" style="background:' + (PLATFORM_COLORS[c.platform] || '#8b7cf6') + '">' + c.platform_name[0] + '</div>' +
-      '<div><div class="nm">' + c.platform_name + (c.label ? ' · ' + c.label : '') + '</div>' +
-      '<div class="st ' + c.status + '">' + stTxt + '</div>' +
-      '<div class="muted" style="font-size:11.5px">' + c.capabilities.join(' · ') + '</div></div>' +
+      '<div class="logo" style="background:' + (PLATFORM_COLORS[c.platform] || '#8b7cf6') + '">' + esc((c.platform_name || '?')[0]) + '</div>' +
+      '<div><div class="nm">' + esc(c.platform_name) + (c.label ? ' · ' + esc(c.label) : '') + '</div>' +
+      '<div class="st ' + esc(c.status) + '">' + stTxt + '</div>' +
+      '<div class="muted" style="font-size:11.5px">' + (c.capabilities || []).map(esc).join(' · ') + '</div></div>' +
       '<div class="acts">' +
       '<button class="btn ghost sm" onclick="testConn(\'' + c.id + '\')">Test Et</button>' +
       '<button class="btn ghost sm" onclick="openConnModal(\'' + c.id + '\')">Düzenle</button>' +
@@ -377,16 +379,33 @@ function openConnModal(id) {
 function renderConnFields(cur) {
   const key = $('connPlatform').value;
   const p = platforms.find(x => x.key === key);
-  cur = cur && cur.platform === key ? cur : (editingConnId ? window._conns.find(c => c.id === editingConnId) : null);
-  $('connFields').innerHTML = p.fields.map(f =>
-    '<label>' + f.label + (f.required ? '' : ' <span style="font-weight:400;color:var(--muted)">(isteğe bağlı)</span>') + '</label>' +
-    '<input data-credkey="' + f.key + '" value="' + ((cur && cur.credentials[f.key]) || '') + '"' +
-    (f.key === 'env' ? ' placeholder="prod"' : '') + '>').join('');
+  if (!p || !Array.isArray(p.fields)) {
+    $('connFields').innerHTML = '<p class="muted">Bu platform için ek bilgi gerekmiyor.</p>';
+    return;
+  }
+  cur = cur && cur.platform === key ? cur : (editingConnId ? (window._conns || []).find(c => c.id === editingConnId) : null);
+  $('connFields').innerHTML = p.fields.map(f => {
+    const val = (cur && cur.credentials && cur.credentials[f.key]) || f.default || '';
+    const req = f.required ? '' : ' <span style="font-weight:400;color:var(--muted)">(isteğe bağlı)</span>';
+    const hint = f.hint ? '<div class="muted" style="font-size:12px;margin:-4px 0 10px;line-height:1.45">' + esc(f.hint) + '</div>' : '';
+    if (f.type === 'select' && f.options) {
+      const opts = f.options.map(o =>
+        '<option value="' + escAttr(o.value) + '"' + (String(val || f.default || o.value) === o.value ? ' selected' : '') + '>' + esc(o.label) + '</option>'
+      ).join('');
+      return '<label>' + esc(f.label) + req + '</label>' + hint +
+        '<select data-credkey="' + escAttr(f.key) + '">' + opts + '</select>';
+    }
+    return '<label>' + esc(f.label) + req + '</label>' + hint +
+      '<input data-credkey="' + escAttr(f.key) + '" value="' + escAttr(val) + '"' +
+      (f.key === 'seller_id' ? ' placeholder="Örn: 2738"' : '') + '>';
+  }).join('');
 }
 
 async function saveConn() {
   const creds = {};
-  document.querySelectorAll('#connFields input').forEach(i => { creds[i.dataset.credkey] = i.value.trim(); });
+  document.querySelectorAll('#connFields input, #connFields select').forEach(i => {
+    creds[i.dataset.credkey] = i.value.trim();
+  });
   const body = { platform: $('connPlatform').value, label: $('connLabel').value, credentials: creds };
   $('connSaveBtn').disabled = true;
   try {

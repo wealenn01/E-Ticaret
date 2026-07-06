@@ -180,7 +180,8 @@ class AmazonAPI(B.MarketplaceClient):
             return self._tag(B.demo_claims("AMZ-"))
         raise B.NotSupported("Amazon iadeleri FBA/MFN raporlarıyla yönetilir (Reports API).")
 
-    def review_claim(self, claim_id: str, approve: bool, reason: str = "") -> dict:
+    def review_claim(self, claim_id: str, approve: bool, reason: str = "",
+                     claim_item_ids: Optional[list[str]] = None) -> dict:
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"İade {'onaylandı' if approve else 'reddedildi'} (DEMO)."}

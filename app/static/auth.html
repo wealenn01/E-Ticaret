@@ -148,6 +148,7 @@ function setMode(m) {
   $('title').textContent = login ? 'Tekrar hoş geldin' : 'Hesap oluştur';
   $('subtitle').textContent = login ? 'Hesabına giriş yap ve paneline devam et.' : 'Ücretsiz planla başla — kredi kartı gerekmez.';
   $('submitBtn').textContent = login ? 'Giriş Yap' : 'Kayıt Ol';
+  $('f_password').setAttribute('autocomplete', login ? 'current-password' : 'new-password');
   $('foot').innerHTML = login
     ? 'Hesabın yok mu? <a href="#" onclick="setMode(\'register\');return false">Ücretsiz kayıt ol</a>'
     : 'Zaten hesabın var mı? <a href="#" onclick="setMode(\'login\');return false">Giriş yap</a>';
@@ -179,8 +180,13 @@ $('form').onsubmit = async e => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || 'İşlem başarısız (' + r.status + ')');
-    if (mode === 'register' && !data.email_verified) {
+    if (!r.ok) {
+      let msg = data.detail || 'İşlem başarısız (' + r.status + ')';
+      if (Array.isArray(msg)) msg = msg.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
+      else if (msg && typeof msg === 'object') msg = msg.msg || msg.message || JSON.stringify(msg);
+      throw new Error(msg);
+    }
+    if (!data.email_verified) {
       location.href = '/auth/verify-pending';
       return;
     }

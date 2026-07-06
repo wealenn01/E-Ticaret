@@ -361,6 +361,17 @@
   .st-Delivered { background: #e5f7ec; color: #166534; }
   html[data-theme="dark"] .st-Delivered { background: #16321f; color: #7ede9e; }
   .st-Cancelled, .st-Returned { background: var(--rose-soft); color: #c0355f; }
+  /* kargo durum rozetleri (asistan kargo tablosu) */
+  .st-badge { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 10px; white-space: nowrap; background: var(--lilac-soft); color: var(--lilac); }
+  .st-badge.st-pending, .st-badge.st-created { background: var(--sky-soft); color: #2563eb; }
+  .st-badge.st-shipped, .st-badge.st-in_transit { background: var(--peach-soft); color: #c07a33; }
+  .st-badge.st-delivered { background: #e5f7ec; color: #166534; }
+  html[data-theme="dark"] .st-badge.st-delivered { background: #16321f; color: #7ede9e; }
+  .st-badge.st-cancelled, .st-badge.st-returned, .st-badge.st-undelivered { background: var(--rose-soft); color: #c0355f; }
+  /* ürün içgörü kararı ton renkleri */
+  .insight-header.insight-verdict-good { border-color: rgba(22,163,74,.35); background: linear-gradient(180deg, rgba(22,163,74,.06), var(--card)); }
+  .insight-header.insight-verdict-warn { border-color: rgba(217,119,6,.35); background: linear-gradient(180deg, rgba(217,119,6,.06), var(--card)); }
+  .insight-header.insight-verdict-bad { border-color: rgba(220,38,38,.35); background: linear-gradient(180deg, rgba(220,38,38,.06), var(--card)); }
   .plat-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--muted); }
   .plat-dot { width: 8px; height: 8px; border-radius: 50%; }
   .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
@@ -1558,7 +1569,7 @@
           <label style="margin-top:0">Başlık <span class="hint" style="display:inline;font-weight:400">(en fazla 100 karakter)</span></label>
           <input id="f_title" maxlength="100">
           <div class="row">
-            <div><label>Marka</label><input id="f_brand"><div class="hint">Gerçek modda markanın Trendyol'da kayıtlı olması gerekir.</div></div>
+            <div><label>Marka</label><input id="f_brand"><div class="hint">Mağazanız bağlıyken markanın Trendyol'da kayıtlı olması gerekir.</div></div>
             <div><label>Kategori</label><input id="f_category" list="catList" autocomplete="off" placeholder="Kategori ara…"><datalist id="catList"></datalist><div class="hint" id="catReason"></div></div>
           </div>
         </div>
@@ -1810,15 +1821,16 @@ async function api(url, opts) {
   let data;
   try { data = JSON.parse(text); }
   catch { throw new Error('Sunucu beklenmedik yanıt döndürdü (' + r.status + '): ' + text.slice(0, 140)); }
+  if (r.status === 403 && data.code === 'email_not_verified') {
+    location.href = '/auth/verify-pending';
+    throw new Error('E-posta doğrulaması gerekli.');
+  }
   if (!r.ok) {
     let msg = data.detail || 'İstek başarısız (' + r.status + ')';
     if (Array.isArray(msg)) msg = msg.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
     else if (typeof msg === 'object') msg = msg.msg || msg.message || JSON.stringify(msg);
-    throw new Error(msg);
-  }
-  if (r.status === 403 && data.code === 'email_not_verified') {
-    location.href = '/auth/verify-pending';
-    throw new Error('E-posta doğrulaması gerekli.');
+    // 402 = paket kısıtı; çağıran taraf isterse yakalar, mesaj kullanıcı dostudur
+    const err = new Error(msg); err.status = r.status; throw err;
   }
   return data;
 }
@@ -1900,8 +1912,9 @@ function switchView(name) {
   document.querySelectorAll('.sitem[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   $('viewTitle').textContent = v.title;
   $('viewSub').textContent = v.sub;
-  if (v.load && !loadedViews.has(name)) { loadedViews.add(name); v.load(); }
-  else if (v.load && ['overview', 'warehouse'].includes(name)) v.load();
+  // Veri görünümleri her girişte tazelenir; asistan/analiz kendi tembel yükleme
+  // bayraklarıyla (assistantLoaded/analyticsLoaded) tekrar yüklemeyi engeller.
+  if (v.load) { loadedViews.add(name); v.load(); }
 }
 const switchTab = switchView; // eski çağrılarla uyumluluk
 
@@ -2287,17 +2300,20 @@ async function loadClaims() {
     const d = await api('/api/mp/claims');
     demoNote('clNote', d.platforms);
     CLAIMS = d.rows;
-    const open = s => ['WaitingInAction', 'Created', 'Open'].includes(s);
+    const canApprove = s => ['WaitingInAction', 'Created'].includes(s);
+    const canReject = s => s === 'WaitingInAction';
     $('clTable').innerHTML = '<tr><th>Talep</th><th>Ürün</th><th>Neden</th><th>Tip</th><th>Platform</th><th>Tarih</th><th>Durum</th><th></th></tr>' +
       (CLAIMS.length ? CLAIMS.map((c, idx) =>
         '<tr><td><strong>' + esc(c.claim_id) + '</strong><br><span class="hint" style="font-size:11px">' + esc(c.order_id) + '</span></td>' +
         '<td>' + esc(c.product) + '</td><td>' + esc(c.reason) + '</td>' +
         '<td>' + (c.type === 'compensation' ? '💼 Tazmin' : '↩️ İade') + '</td>' +
         '<td>' + platTag(c.platform) + '</td><td>' + esc(c.date) + '</td>' +
-        '<td>' + (open(c.status) ? '<span class="pillst st-Picking">Bekliyor</span>' : (c.status === 'Accepted' ? '<span class="pillst st-Delivered">Onaylandı</span>' : '<span class="pillst st-Cancelled">' + esc(c.status) + '</span>')) + '</td>' +
-        '<td>' + (open(c.status)
-          ? '<div class="q-acts" style="margin:0"><button class="mini-btn" onclick="reviewClaim(' + idx + ', true)">Onayla</button>' +
-            '<button class="mini-btn danger" onclick="reviewClaim(' + idx + ', false)">İtiraz</button></div>' : '') + '</td></tr>').join('')
+        '<td>' + (canApprove(c.status) || canReject(c.status) ? '<span class="pillst st-Picking">Bekliyor</span>' : (c.status === 'Accepted' ? '<span class="pillst st-Delivered" title="Onaylanan iadeye itiraz edilemez">Onaylandı</span>' : '<span class="pillst st-Cancelled">' + esc(c.status) + '</span>')) + '</td>' +
+        '<td>' + (canApprove(c.status) || canReject(c.status)
+          ? '<div class="q-acts" style="margin:0">' +
+            (canApprove(c.status) ? '<button class="mini-btn" onclick="reviewClaim(' + idx + ', true)">Onayla</button>' : '') +
+            (canReject(c.status) ? '<button class="mini-btn danger" onclick="reviewClaim(' + idx + ', false)">İtiraz</button>' : '') +
+            '</div>' : '') + '</td></tr>').join('')
         : '<tr><td colspan="8" class="hint">İade talebi yok.</td></tr>');
   } catch (e) { toast(e.message); }
 }
@@ -2308,7 +2324,8 @@ async function reviewClaim(idx, approve) {
   if (!approve && !reason) return;
   try {
     const r = await api('/api/mp/claims/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: c.platform, claim_id: c.claim_id, approve, reason }) });
+      body: JSON.stringify({ platform: c.platform, claim_id: c.claim_id, approve, reason,
+        claim_item_ids: c.claim_item_ids || [] }) });
     toast(r.message, 'ok');
     c.status = approve ? 'Accepted' : 'Rejected';
     loadClaims(); loadOverview();
@@ -2630,7 +2647,9 @@ function fillDraftForm(data) {
   $('f_desc').innerHTML = d.description_html;
   $('f_brand').value = d.brand;
   $('f_category').value = d.category_name;
-  $('catReason').textContent = (d.category_confidence ? '[güven: ' + d.category_confidence + '] ' : '') + (data.category_reasoning || '');
+  const _conf = d.category_confidence;
+  const _confLbl = _conf == null ? '' : (_conf >= 0.8 ? 'Eşleşme: Yüksek — ' : _conf >= 0.5 ? 'Eşleşme: Orta — ' : 'Eşleşme: Düşük — ');
+  $('catReason').textContent = _confLbl + (data.category_reasoning || '');
   $('f_sale').value = d.sale_price;
   $('f_list').value = d.list_price;
   $('f_qty').value = d.quantity;

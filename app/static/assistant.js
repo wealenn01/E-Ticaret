@@ -50,11 +50,12 @@
     const r = await fetch(abs, { credentials: "same-origin", ...opts });
     const text = await r.text();
     let data;
-    try { data = JSON.parse(text); } catch { throw new Error("Sunucu hatası (" + r.status + ")"); }
+    try { data = JSON.parse(text); } catch { const e = new Error("Sunucu hatası (" + r.status + ")"); e.status = r.status; throw e; }
     if (!r.ok) {
       const msg = formatApiError(data?.detail) || "İstek başarısız (" + r.status + ")";
-      if (r.status === 404) throw new Error("Rapor API bulunamadı — sunucuyu yeniden başlatın (Ctrl+Shift+R).");
-      throw new Error(msg);
+      const e = new Error(r.status === 404 ? "Rapor API bulunamadı — sunucuyu yeniden başlatın (Ctrl+Shift+R)." : msg);
+      e.status = r.status;
+      throw e;
     }
     return data;
   }
@@ -384,6 +385,8 @@
           <button class="import-tab${state.importMode === "link" ? " on" : ""}" data-mode="link">Link ile çek</button>
           <button class="import-tab${state.importMode === "csv" ? " on" : ""}" data-mode="csv">CSV ile</button>
         </div>
+        <p class="hint" style="margin:10px 0 6px">Hızlı başlamak için mağazanıza uygun örnek yorum ve sipariş verisi:</p>
+        <button type="button" class="mini-btn" id="seedDemoBtn">Örnek veri yükle</button>
         ${state.importMode === "link" ? linkPanel : csvPanel}
       </div>`;
 
@@ -396,6 +399,18 @@
   }
 
   function bindImportEvents() {
+    const seedBtn = $("seedDemoBtn");
+    if (seedBtn) {
+      seedBtn.onclick = async () => {
+        seedBtn.disabled = true; seedBtn.textContent = "Yükleniyor…";
+        try {
+          const r = await api("/api/assistant/seed-demo-store", { method: "POST" });
+          toast(r.message || "Örnek veri yüklendi", "ok");
+          await refreshData();
+        } catch (e) { toast(e.message, "err"); }
+        finally { seedBtn.disabled = false; seedBtn.textContent = "Örnek veri yükle"; }
+      };
+    }
     const scrapeBtn = $("scrapeSubmitBtn");
     if (scrapeBtn) {
       scrapeBtn.onclick = async () => {
@@ -545,11 +560,13 @@
         state.expandedSku = null;
         state.selectedSku = null;
         state.reportData = null;
-        await api("/api/assistant/settings", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ platform: state.platform }),
-        });
-        await refreshData();
+        try {
+          await api("/api/assistant/settings", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ platform: state.platform }),
+          });
+          await refreshData();
+        } catch (e) { toast(e.message, "err"); }
       };
     });
   }
@@ -605,7 +622,7 @@
     const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
     const dataHint = dataCount > 0
       ? `${dataCount} yorum · ${consultantProducts.length || 0} ürün${selected ? ` · ${selected.product_name}` : ""}`
-      : "Veri yok — Yorumlar sekmesinden link veya CSV ekleyin.";
+      : "Henüz veri yok — Yorumlar sekmesinden link veya CSV ile yorum ekleyin ya da örnek veri yükleyin.";
 
     $("productPicker").innerHTML = `
       <p class="hint">${esc(dataHint)}</p>
@@ -660,7 +677,7 @@
           </div>
         </div>`;
       } else {
-        chartsEl.innerHTML = '<p class="hint">Grafikler için yorum verisi gerekir.</p>';
+        chartsEl.innerHTML = '<p class="hint">Grafikler için yorum verisi gerekir — Yorumlar sekmesinden link veya CSV ile ekleyin ya da örnek veri yükleyin.</p>';
       }
     }
     const insightsEl = $("insightsBlock");
@@ -705,7 +722,7 @@
       extra += `<ul class="consultant-evidence-list">${d.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul>`;
     }
     if (d.price_comparison?.length) {
-      extra += `<div class="price-compare-block"><strong>Hepsiburada fiyat listesi</strong><table class="ship-table"><thead><tr><th>Ürün</th><th>Fiyat</th><th>Satıcı</th></tr></thead><tbody>${d.price_comparison.map(row => `<tr><td>${row.url ? `<a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.name)}</a>` : esc(row.name)}</td><td>${Number(row.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL</td><td>${esc(row.merchant || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+      extra += `<div class="price-compare-block"><strong>Pazaryeri fiyat karşılaştırması</strong><table class="ship-table"><thead><tr><th>Ürün</th><th>Fiyat</th><th>Satıcı</th></tr></thead><tbody>${d.price_comparison.map(row => `<tr><td>${row.url ? `<a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.name)}</a>` : esc(row.name)}</td><td>${Number(row.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL</td><td>${esc(row.merchant || "—")}</td></tr>`).join("")}</tbody></table></div>`;
     }
     if (d.review_benchmark) {
       const b = d.review_benchmark;
@@ -726,7 +743,14 @@
   async function loadPresets() {
     const consultantProducts = state.allProducts.length ? state.allProducts : state.products;
     const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
-    const groups = await api("/api/assistant/presets" + (selected ? "?product_name=" + encodeURIComponent(selected.product_name) : ""));
+    let groups;
+    try {
+      groups = await api("/api/assistant/presets" + (selected ? "?product_name=" + encodeURIComponent(selected.product_name) : ""));
+    } catch (e) {
+      const el = $("presetGroups");
+      if (el) el.innerHTML = `<p class="hint err">Hazır sorular yüklenemedi: ${esc(e.message)}</p>`;
+      return;
+    }
     const display = selected
       ? groups
       : [
@@ -734,6 +758,7 @@
           { title: "İade", questions: (groups.find(g => g.id === "returns") || { questions: [] }).questions },
           { title: "Kargo", questions: (groups.find(g => g.id === "cargo") || { questions: [] }).questions },
         ].filter(g => g.questions.length);
+    if (!$("presetGroups")) return;
     $("presetGroups").innerHTML = display.map((g, i) => `
       <section class="preset-group ${presetTone(g, i)}">
         <h4>${esc(g.title)}</h4>

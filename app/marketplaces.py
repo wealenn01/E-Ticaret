@@ -5,6 +5,7 @@ Hepsiburada / N11 / Amazon: bağlantı kaydı tutulur; yorum çekme (link ile) v
 CSV importu her platformda çalışır, API tabanlı ürün gönderimi Trendyol'dadır.
 """
 import json
+import os
 from typing import Optional
 
 import httpx
@@ -12,20 +13,30 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import db
-from .trendyol_client import TrendyolClient
+from .trendyol_client import TrendyolClient, normalize_trendyol_env
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
+
+DEFAULT_TRENDYOL_ENV = normalize_trendyol_env(os.getenv("TRENDYOL_ENV", "stage"))
 
 PLATFORMS = {
     "trendyol": {
         "name": "Trendyol",
         "fields": [
-            {"key": "seller_id", "label": "Satıcı ID", "required": True},
-            {"key": "api_key", "label": "API Key", "required": True},
-            {"key": "api_secret", "label": "API Secret", "required": True, "secret": True},
-            {"key": "env", "label": "Ortam (stage/prod)", "required": False},
+            {"key": "seller_id", "label": "Satıcı ID (Supplier ID)", "required": True,
+             "hint": "Stage test hesabı için genelde 2738"},
+            {"key": "api_key", "label": "API Key", "required": True,
+             "hint": "Stage panel → Hesap Bilgilerim → Entegrasyon Bilgileri"},
+            {"key": "api_secret", "label": "API Secret", "required": True, "secret": True,
+             "hint": "Panel giriş şifresi değil — entegrasyon sayfasındaki gizli anahtar"},
+            {"key": "env", "label": "Ortam", "required": False, "type": "select",
+             "options": [
+                 {"value": "stage", "label": "Test ortamı (Stage)"},
+                 {"value": "prod", "label": "Canlı ortam (Production)"},
+             ],
+             "default": DEFAULT_TRENDYOL_ENV if DEFAULT_TRENDYOL_ENV in ("stage", "prod") else "stage"},
         ],
-        "capabilities": ["AI ile ürün ilanı (API)", "Kategori/özellik eşleştirme", "Yorum çekme", "CSV analiz"],
+        "capabilities": ["Ürün ilanı", "Kategori ve özellik eşleştirme", "Yorum çekme", "CSV analiz"],
     },
     "hepsiburada": {
         "name": "Hepsiburada",
@@ -89,6 +100,10 @@ def _mask(row: dict) -> dict:
     }
 
 
+def _normalize_trendyol_env(env: Optional[str]) -> str:
+    return normalize_trendyol_env(env)
+
+
 def list_user_connections(user_id: str) -> list[dict]:
     return db.query("SELECT * FROM connections WHERE user_id=? ORDER BY created_at", (user_id,))
 
@@ -102,7 +117,7 @@ def trendyol_client_for(user_id: str) -> TrendyolClient:
                 seller_id=str(creds.get("seller_id", "")),
                 api_key=str(creds.get("api_key", "")),
                 api_secret=str(creds.get("api_secret", "")),
-                env=str(creds.get("env") or "prod"),
+                env=_normalize_trendyol_env(creds.get("env")),
             )
     return TrendyolClient()
 
@@ -186,30 +201,40 @@ def _test_amazon(creds: dict) -> tuple[str, str]:
 def _test_connection(platform: str, creds: dict) -> tuple[str, str]:
     """(status, message) döner; her platform gerçek API çağrısıyla doğrulanır."""
     if platform == "trendyol":
-        client = TrendyolClient(
-            seller_id=str(creds.get("seller_id", "")),
-            api_key=str(creds.get("api_key", "")),
-            api_secret=str(creds.get("api_secret", "")),
-            env=str(creds.get("env") or "prod"),
-        )
+        env = _normalize_trendyol_env(creds.get("env"))
+        seller_id = str(creds.get("seller_id", "") or "").strip()
+        api_key = str(creds.get("api_key", "") or "").strip()
+        api_secret = str(creds.get("api_secret", "") or "").strip()
+        if not seller_id or not api_key or not api_secret:
+            return "unverified", "Satıcı ID, API Key ve API Secret alanlarının tamamını doldurun."
+        creds = {**creds, "seller_id": seller_id, "api_key": api_key, "api_secret": api_secret, "env": env}
+        client = TrendyolClient(seller_id=seller_id, api_key=api_key, api_secret=api_secret, env=env)
         if client.mock:
-            return "unverified", "Anahtarlar eksik — bağlantı kaydedildi ama doğrulanamadı."
+            return "unverified", "Kimlik bilgileri eksik — bağlantı kaydedildi ama doğrulanamadı."
         try:
-            # Kimlik doğrulaması gerektiren authenticated endpoint'i test et
             from app.marketplace_api.trendyol_api import TrendyolAPI
             api = TrendyolAPI(creds)
             products = api._req("GET", f"/product/sellers/{client.seller_id}/products",
                                 params={"page": 0, "size": 1})
-            count = products.get("totalElements", products.get("content", []))
-            if isinstance(count, list):
-                count = "?"
-            return "active", f"Bağlantı doğrulandı — Satıcı ID geçerli, ürünler erişilebilir ({count} ürün)."
+            env_label = "test" if env == "stage" else "canlı"
+            return "active", f"Bağlantı doğrulandı ({env_label} ortam). Mağazanızdaki ürünlere erişilebiliyor."
         except httpx.HTTPStatusError as e:
-            if e.response.status_code in (401, 403):
-                return "error", "API anahtarları reddedildi (401/403) — Satıcı Paneli > Entegrasyon Bilgileri'nden kontrol et."
-            return "error", f"Trendyol API hatası: {e.response.status_code}"
+            code = e.response.status_code
+            if code in (401, 403):
+                wrong_env = (
+                    " Test hesabı kullanıyorsanız Ortam alanında «Test ortamı (Stage)» seçili olmalı."
+                    if env == "prod" else
+                    " Canlı mağaza bağlıyorsanız Ortam alanında «Canlı ortam» seçin."
+                )
+                return "error", (
+                    "Kimlik bilgileri kabul edilmedi."
+                    + wrong_env
+                    + " API Key ve Secret değerlerini paneldeki Entegrasyon Bilgileri bölümünden alın "
+                    "(panel giriş şifresi değildir)."
+                )
+            return "error", f"Trendyol bağlantısı kurulamadı (kod {code}). Bilgileri kontrol edip tekrar deneyin."
         except Exception as e:
-            return "error", f"Bağlantı kurulamadı: {str(e)[:150]}"
+            return "error", f"Bağlantı kurulamadı: {str(e)[:120]}"
     if platform == "hepsiburada":
         return _test_hepsiburada(creds)
     if platform == "n11":
@@ -238,6 +263,13 @@ def my_connections(request: Request):
     return [_mask(r) for r in list_user_connections(user["id"])]
 
 
+def _prepare_credentials(platform: str, creds: dict) -> dict:
+    out = {k: (v.strip() if isinstance(v, str) else v) for k, v in creds.items()}
+    if platform == "trendyol":
+        out["env"] = normalize_trendyol_env(out.get("env"))
+    return out
+
+
 @router.post("")
 def add_connection(req: ConnectionRequest, request: Request):
     from . import billing
@@ -255,12 +287,13 @@ def add_connection(req: ConnectionRequest, request: Request):
             f"Paketin en fazla {store_limit} pazaryeri bağlantısına izin veriyor. "
             "Daha fazla mağaza için paketini yükselt.",
         )
-    status, message = _test_connection(req.platform, req.credentials)
+    creds = _prepare_credentials(req.platform, req.credentials)
+    status, message = _test_connection(req.platform, creds)
     conn_id = db.new_id()
     db.execute(
         "INSERT INTO connections (id, user_id, platform, label, credentials, status, created_at, last_check) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        (conn_id, user["id"], req.platform, req.label.strip(), json.dumps(req.credentials),
+        (conn_id, user["id"], req.platform, req.label.strip(), json.dumps(creds),
          status, db.now(), db.now()),
     )
     row = db.query_one("SELECT * FROM connections WHERE id=?", (conn_id,))
@@ -278,6 +311,7 @@ def update_connection(conn_id: str, req: ConnectionRequest, request: Request):
     creds = {}
     for k, v in req.credentials.items():
         creds[k] = old.get(k, "") if isinstance(v, str) and v.startswith("••••") else v
+    creds = _prepare_credentials(row["platform"], creds)
     status, message = _test_connection(row["platform"], creds)
     db.execute(
         "UPDATE connections SET label=?, credentials=?, status=?, last_check=? WHERE id=?",
