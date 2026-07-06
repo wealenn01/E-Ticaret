@@ -167,8 +167,8 @@ def _sku_from_url(url: str, platform: str) -> str:
 
 
 def _trendyol_content_id(url: str) -> str | None:
-    m = re.search(r"-p-(\d+)", url)
-    return m.group(1) if m else None
+    matches = re.findall(r"-p-(\d+)", url)
+    return matches[-1] if matches else None
 
 
 def _amazon_asin_from_url(url: str) -> str | None:
@@ -469,16 +469,96 @@ def _parse_date(value: str | None) -> date:
     return date.today()
 
 
+def _parse_schema_review(obj: dict) -> dict | None:
+    """Parse schema.org Review objects (Trendyol ld+json)."""
+    if not isinstance(obj, dict):
+        return None
+    text = (
+        obj.get("reviewBody")
+        or obj.get("description")
+        or obj.get("content")
+        or obj.get("comment")
+    )
+    if not text or not isinstance(text, str):
+        return None
+    text = text.strip()
+    if len(text) < 3:
+        return None
+    rating = None
+    rating_obj = obj.get("reviewRating")
+    if isinstance(rating_obj, dict):
+        rating = rating_obj.get("ratingValue") or rating_obj.get("rating")
+    if rating is None:
+        rating = obj.get("rating") or obj.get("star") or obj.get("rate")
+    if rating is None:
+        return None
+    try:
+        r = int(round(float(rating)))
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= r <= 5:
+        return None
+    return {
+        "rating": r,
+        "comment_text": text[:4000],
+        "review_date": _parse_date(
+            str(obj.get("datePublished") or obj.get("dateCreated") or obj.get("date") or "")
+        ),
+    }
+
+
+def _extract_ldjson_reviews(html: str) -> list[dict]:
+    found: list[dict] = []
+    seen: set[str] = set()
+    for block in re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        re.S | re.I,
+    ):
+        try:
+            data = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("@type") == "Product":
+                reviews = item.get("review") or []
+                if isinstance(reviews, dict):
+                    reviews = [reviews]
+                for rev in reviews:
+                    parsed = _parse_schema_review(rev)
+                    if parsed and parsed["comment_text"] not in seen:
+                        seen.add(parsed["comment_text"])
+                        found.append(parsed)
+            elif item.get("@type") == "Review" or item.get("reviewBody"):
+                parsed = _parse_schema_review(item)
+                if parsed and parsed["comment_text"] not in seen:
+                    seen.add(parsed["comment_text"])
+                    found.append(parsed)
+    return found
+
+
 def _walk_json_for_reviews(obj, found: list[dict], seen: set[str]) -> None:
     if isinstance(obj, dict):
+        if obj.get("@type") == "Review" or obj.get("reviewBody"):
+            parsed = _parse_schema_review(obj)
+            if parsed and parsed["comment_text"] not in seen:
+                seen.add(parsed["comment_text"])
+                found.append(parsed)
         rating = obj.get("rating") or obj.get("star") or obj.get("rate") or obj.get("score")
         text = (
             obj.get("content")
             or obj.get("comment")
             or obj.get("comment_text")
             or obj.get("reviewText")
+            or obj.get("reviewBody")
             or obj.get("text")
         )
+        rating_obj = obj.get("reviewRating")
+        if isinstance(rating_obj, dict) and rating is None:
+            rating = rating_obj.get("ratingValue") or rating_obj.get("rating")
         if rating is not None and text and isinstance(text, str):
             text = text.strip()
             if len(text) >= 3 and text not in seen:
@@ -491,7 +571,13 @@ def _walk_json_for_reviews(obj, found: list[dict], seen: set[str]) -> None:
                                 "rating": r,
                                 "comment_text": text[:4000],
                                 "review_date": _parse_date(
-                                    str(obj.get("created_at") or obj.get("createdAt") or obj.get("date") or "")
+                                    str(
+                                        obj.get("datePublished")
+                                        or obj.get("created_at")
+                                        or obj.get("createdAt")
+                                        or obj.get("date")
+                                        or ""
+                                    )
                                 ),
                             }
                         )
@@ -520,6 +606,12 @@ def _extract_from_embedded_json(html: str) -> list[dict]:
             _walk_json_for_reviews(json.loads(block), found, seen)
         except json.JSONDecodeError:
             continue
+
+    ld_reviews = _extract_ldjson_reviews(html)
+    for r in ld_reviews:
+        if r["comment_text"] not in seen:
+            seen.add(r["comment_text"])
+            found.append(r)
 
     return found
 
@@ -821,7 +913,7 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
     """Fetch reviews from Trendyol's public discovery review API."""
     collected: list[dict] = []
     total_available = 0
-    page = 0
+    page = 1
     headers = _browser_headers(
         "trendyol",
         accept="application/json, text/plain, */*",
@@ -840,14 +932,10 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
                 "channelId": 1,
             },
         )
-        if status_code == 403:
-            raise ValueError(_access_blocked_message("trendyol"))
+        if status_code in (403, 556, 503):
+            break
         if status_code >= 400:
-            raise httpx.HTTPStatusError(
-                f"HTTP {status_code}",
-                request=httpx.Request("GET", _TRENDYOL_REVIEWS_API),
-                response=httpx.Response(status_code, text=text),
-            )
+            break
         payload = json.loads(text)
         reviews_block = (payload.get("result") or {}).get("productReviews") or {}
         total_available = int(reviews_block.get("totalElements") or 0)
@@ -869,9 +957,7 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
             break
 
     if not collected:
-        raise ValueError(
-            "Bu Trendyol ürünü için yorum bulunamadı. Linkin doğru olduğundan emin olun veya CSV ile yükleyin."
-        )
+        raise ValueError("TRENDYOL_API_EMPTY")
 
     product_name = _product_name_from_trendyol_url(source_url)
     meta = {
@@ -1029,12 +1115,48 @@ async def scrape_reviews_from_url(url: str) -> tuple[list[dict], dict]:
                 meta["source_url"] = page_url
                 meta["content_id"] = content_id
                 return rows, meta
+            except ValueError as exc:
+                if str(exc) != "TRENDYOL_API_EMPTY":
+                    raise
+                logger.info("Trendyol API empty/blocked for %s — trying page HTML", content_id)
             except httpx.HTTPStatusError as exc:
                 logger.warning("Trendyol API failed for %s: %s", content_id, exc)
-            except ValueError:
-                raise
             except httpx.RequestError as exc:
                 logger.warning("Trendyol API request failed for %s: %s", content_id, exc)
+
+            try:
+                html = await fetch_review_page_html(page_url, platform)
+                product_name = _product_name_from_html(html, page_url) or _product_name_from_trendyol_url(url)
+                image_url = _product_image_from_html(html)
+                raw_reviews = _extract_ldjson_reviews(html)
+                if len(raw_reviews) < 3:
+                    raw_reviews.extend(_extract_from_embedded_json(html))
+                if len(raw_reviews) < 3:
+                    raw_reviews.extend(_extract_from_html_patterns(html))
+                rows, meta = _rows_from_raw_reviews(
+                    raw_reviews,
+                    product_name=product_name,
+                    sku=sku,
+                    platform=platform,
+                    source_url=page_url,
+                )
+                meta["image_url"] = image_url
+                meta["source_url"] = page_url
+                meta["content_id"] = content_id
+                if len(raw_reviews) < 50:
+                    meta["note"] = (
+                        f"Sayfadan {len(raw_reviews)} yorum alındı (SEO önizlemesi). "
+                        "Daha fazlası için CSV yükleyebilirsiniz."
+                    )
+                return rows, meta
+            except ValueError:
+                raise
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    raise ValueError("Sayfa bulunamadı — linki kontrol edin") from exc
+                raise ValueError(f"Sayfa açılamadı (HTTP {exc.response.status_code})") from exc
+            except httpx.RequestError as exc:
+                raise ValueError("Sayfa yüklenemedi — linki kontrol edin veya sonra tekrar deneyin") from exc
 
     if platform == "hepsiburada" and not sku.startswith("SCRAPE-"):
         html = ""
@@ -1086,7 +1208,9 @@ async def scrape_reviews_from_url(url: str) -> tuple[list[dict], dict]:
 
     product_name = product_name or _product_name_from_html(html, page_url)
     image_url = image_url or _product_image_from_html(html)
-    raw_reviews = _extract_from_embedded_json(html)
+    raw_reviews = _extract_ldjson_reviews(html)
+    if len(raw_reviews) < 3:
+        raw_reviews.extend(_extract_from_embedded_json(html))
     if len(raw_reviews) < 3:
         raw_reviews.extend(_extract_from_html_patterns(html))
 

@@ -1,4 +1,4 @@
-# 🛒 TrendolAi — Çoklu Pazaryeri E-Ticaret SaaS Paneli
+# 🛒 AnalizAi — Çoklu Pazaryeri E-Ticaret SaaS Paneli
 
 Üyelik sistemli, paket satın alınabilen, yapay zeka destekli pazaryeri satış asistanı.
 Satıcılar hesap açar, paket seçer, mağazalarını bağlar ve sidebar'lı tek panelden yönetir:

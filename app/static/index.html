@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TrendolAi — Pazaryeri Satışlarınızı Yapay Zeka ile Katlayın</title>
+<title>AnalizAi — Pazaryeri Satışlarınızı Yapay Zeka ile Katlayın</title>
 <meta name="description" content="Trendyol, Hepsiburada, N11 ve Amazon TR mağazalarınızı tek panelden yönetin: AI ile 10 dakikada ilan, akıllı soru yanıtlama, buybox takibi, dinamik fiyatlandırma ve kârlılık analitiği.">
 <script>
   (function () {
@@ -16,6 +16,7 @@
     localStorage.setItem('theme', h.dataset.theme);
   }
 </script>
+<link rel="stylesheet" href="/static/trendol-theme.css?v=202607074400">
 <style>
   :root {
     --ink: #2b2640;
@@ -34,20 +35,20 @@
     --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
   }
   html[data-theme="dark"] {
-    --ink: #ebe8f7;
-    --muted: #9a94b8;
-    --lilac: #9d8ffa;
-    --lilac-soft: #2b2547;
-    --peach: #f9b17c;
-    --peach-soft: #38291e;
-    --sky-soft: #1c2a3a;
-    --rose-soft: #35202c;
-    --border: #2d2749;
-    --bg: #131020;
-    --bg2: #17132a;
-    --card: #1c1832;
-    --navbg: rgba(19,16,32,.85);
-    --shadow: 0 2px 8px rgba(0,0,0,.25), 0 14px 44px rgba(0,0,0,.35);
+    --ink: var(--tl-text, #ece8f8);
+    --muted: var(--tl-muted, #918ba8);
+    --lilac: var(--tl-violet, #a78bfa);
+    --lilac-soft: var(--tl-violet-dim, rgba(120, 100, 220, 0.14));
+    --peach: var(--tl-amber, #f0c27a);
+    --peach-soft: var(--tl-amber-dim, rgba(240, 194, 122, 0.12));
+    --sky-soft: var(--tl-sky-dim, rgba(142, 197, 255, 0.1));
+    --rose-soft: var(--tl-rose-dim, rgba(240, 168, 184, 0.1));
+    --border: var(--tl-border, rgba(110, 95, 180, 0.2));
+    --bg: var(--tl-bg, #08060f);
+    --bg2: var(--tl-bg2, #0e0c18);
+    --card: var(--tl-card, #12101c);
+    --navbg: rgba(8, 6, 15, 0.92);
+    --shadow: 0 2px 8px rgba(0,0,0,.28), 0 14px 44px rgba(0,0,0,.38);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
@@ -83,8 +84,8 @@
   }
   .btn:hover { transform: scale(1.06); }
   .btn:active { transform: scale(.98); }
-  .btn.primary { background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; box-shadow: 0 6px 20px rgba(139,124,246,.35); }
-  .btn.primary:hover { box-shadow: 0 10px 30px rgba(139,124,246,.45); }
+  .btn.primary { background: linear-gradient(135deg, var(--lilac), var(--tl-teal, #2dd4bf)); color: #0a0812; box-shadow: 0 6px 20px rgba(110,231,214,.2); font-weight: 700; }
+  .btn.primary:hover { box-shadow: 0 10px 30px rgba(110,231,214,.28); }
   .btn.ghost { background: var(--card); color: var(--ink); border: 1.5px solid var(--border); }
   .btn.ghost:hover { border-color: #d8d2ee; }
   .btn.big { padding: 15px 34px; font-size: 16px; border-radius: 14px; }
@@ -103,7 +104,7 @@
   }
   .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--peach); }
   .hero h1 { font-size: clamp(32px, 4.6vw, 52px); line-height: 1.12; letter-spacing: -1.4px; font-weight: 800; margin: 22px 0 18px; }
-  .hero h1 .grad { background: linear-gradient(120deg, var(--lilac), var(--peach)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero h1 .grad { background: linear-gradient(120deg, var(--lilac), var(--tl-teal, #2dd4bf) 55%, var(--peach)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .hero p.lead { font-size: 16.5px; color: var(--muted); margin-bottom: 30px; max-width: 520px; }
   .hero .actions { display: flex; gap: 14px; flex-wrap: wrap; }
 
@@ -182,12 +183,47 @@
   .fv-info { background: var(--sky-soft); color: #2563eb; }
 
   /* adımlar */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .stp { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 26px 22px; box-shadow: var(--shadow); transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
-  .stp:hover { transform: translateY(-4px); }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+  .stp-wrap { position: relative; display: flex; flex-direction: column; }
+  .stp { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 26px 22px; box-shadow: var(--shadow); transition: transform .25s cubic-bezier(.34,1.56,.64,1), border-radius .25s ease, border-color .2s; }
+  .stp-wrap:not(.drawer-open) .stp:hover { transform: translateY(-4px); }
+  .stp-wrap.drawer-open .stp {
+    transform: none;
+    border-radius: 16px 16px 0 0;
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
   .stp .n { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--lilac), var(--peach)); color: #fff; font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
   .stp h4 { font-size: 15.5px; margin-bottom: 6px; }
   .stp p { font-size: 13px; color: var(--muted); }
+  .stp-drawer {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    max-height: 0; opacity: 0; overflow: hidden;
+    margin-top: 0; padding: 0 16px;
+    border: 2px solid transparent; border-top: 0;
+    border-radius: 0 0 14px 14px;
+    background: linear-gradient(180deg, rgba(232, 168, 74, 0.14), rgba(232, 168, 74, 0.06));
+    color: #c47a12; text-decoration: none;
+    font-size: 13px; font-weight: 800; letter-spacing: .02em;
+    transition: max-height .32s ease, opacity .28s ease, padding .32s ease, border-color .2s, box-shadow .28s;
+    pointer-events: none; cursor: pointer;
+  }
+  html[data-theme="dark"] .stp-drawer { color: #f0c27a; background: linear-gradient(180deg, rgba(240, 194, 122, 0.16), rgba(240, 194, 122, 0.05)); }
+  .stp-wrap.drawer-open .stp-drawer {
+    max-height: 64px; opacity: 1;
+    padding: 14px 16px;
+    border-color: #e8a84a;
+    border-top: 2px solid #e8a84a;
+    box-shadow: 0 10px 28px rgba(232, 168, 74, 0.22);
+    pointer-events: auto;
+  }
+  html[data-theme="dark"] .stp-wrap.drawer-open .stp-drawer {
+    border-color: #f0c27a;
+    border-top-color: #f0c27a;
+    box-shadow: 0 10px 28px rgba(240, 194, 122, 0.18);
+  }
+  .stp-drawer-arrow { font-size: 11px; opacity: .85; }
+  .stp-drawer:hover { filter: brightness(1.06); }
 
   /* fiyatlar */
   .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; align-items: stretch; }
@@ -244,7 +280,7 @@
 <body>
 
 <nav class="rise">
-  <a href="/" class="brand"><span class="mark">T</span>Trendol<em>Ai</em></a>
+  <a href="/" class="brand"><span class="mark">A</span>Analiz<em>Ai</em></a>
   <div class="links">
     <a href="#ozellikler">Özellikler</a>
     <a href="#ai">AI Araçları</a>
@@ -446,9 +482,18 @@
       <p>Kurulum yok, kredi kartı yok — 2 dakikada panelin hazır.</p>
     </div>
     <div class="steps">
-      <div class="stp reveal"><div class="n">1</div><h4>Ücretsiz hesap aç</h4><p>E-posta ile kayıt ol; ücretsiz plan anında aktif.</p></div>
-      <div class="stp reveal"><div class="n">2</div><h4>Mağazanı bağla</h4><p>Pazaryeri bağlantını birkaç adımda tamamla — bağlantı otomatik doğrulanır. Bağlamadan da örnek verilerle keşfedebilirsin.</p></div>
-      <div class="stp reveal"><div class="n">3</div><h4>AI çalışmaya başlasın</h4><p>Siparişler, sorular ve analizler panele akar; sen sadece onayla.</p></div>
+      <div class="stp-wrap reveal">
+        <article class="stp"><div class="n">1</div><h4>Ücretsiz hesap aç</h4><p>E-posta ile kayıt ol; ücretsiz plan anında aktif.</p></article>
+        <a class="stp-drawer" href="/auth?mode=register">Hesap açmak için basın <span class="stp-drawer-arrow" aria-hidden="true">→</span></a>
+      </div>
+      <div class="stp-wrap reveal">
+        <article class="stp"><div class="n">2</div><h4>Mağazanı bağla</h4><p>Pazaryeri bağlantını birkaç adımda tamamla — bağlantı otomatik doğrulanır. Bağlamadan da örnek verilerle keşfedebilirsin.</p></article>
+        <a class="stp-drawer" href="/account">Mağaza bağlamak için basın <span class="stp-drawer-arrow" aria-hidden="true">→</span></a>
+      </div>
+      <div class="stp-wrap reveal">
+        <article class="stp"><div class="n">3</div><h4>AI çalışmaya başlasın</h4><p>Siparişler, sorular ve analizler panele akar; sen sadece onayla.</p></article>
+        <a class="stp-drawer" href="/panel">Panele gitmek için basın <span class="stp-drawer-arrow" aria-hidden="true">→</span></a>
+      </div>
     </div>
   </div>
 </section>
@@ -525,7 +570,7 @@
     </div>
     <div class="faq reveal">
       <details>
-        <summary>TrendolAi nasıl çalışır?</summary>
+        <summary>AnalizAi nasıl çalışır?</summary>
         <p>Hesap açıp pazaryeri mağazanızı bağlarsınız. Siparişler, ürünler, sorular ve iadeler panele akar; yapay zeka araçları ilan hazırlama, soru cevaplama ve analiz işlerini üstlenir. Bağlamadan da tüm modülleri örnek verilerle deneyebilirsiniz.</p>
       </details>
       <details>
@@ -579,8 +624,8 @@
 <footer>
   <div class="f-cols">
     <div>
-      <a href="/" class="brand" style="margin-bottom:10px"><span class="mark">T</span>Trendol<em>Ai</em></a>
-      <p>Yapay zeka destekli çoklu pazaryeri satış asistanı. Sorularınız mı var? <a href="mailto:destek@trendolai.com" style="display:inline;color:var(--lilac);font-weight:700">Gelin konuşalım →</a></p>
+      <a href="/" class="brand" style="margin-bottom:10px"><span class="mark">A</span>Analiz<em>Ai</em></a>
+      <p>Yapay zeka destekli çoklu pazaryeri satış asistanı. Sorularınız mı var? <a href="mailto:destek@analizai.com" style="display:inline;color:var(--lilac);font-weight:700">Gelin konuşalım →</a></p>
     </div>
     <div>
       <h4>Ürün</h4>
@@ -597,7 +642,7 @@
       <a href="/account">Hesabım</a>
     </div>
   </div>
-  <div class="f-bottom">© 2026 TrendolAi — Tüm hakları saklıdır. · *Sonuçlar mağazaya göre değişir; belirtilen oranlar hedeflenen kullanım senaryolarına dayalıdır.</div>
+  <div class="f-bottom">© 2026 AnalizAi — Tüm hakları saklıdır. · *Sonuçlar mağazaya göre değişir; belirtilen oranlar hedeflenen kullanım senaryolarına dayalıdır.</div>
 </footer>
 
 <script>
@@ -606,6 +651,28 @@
     entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('on'); io.unobserve(e.target); } });
   }, { threshold: .12 });
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // adım kartları — 1 sn hover sonrası turuncu çekmece
+  const STP_HOVER_MS = 1000;
+  document.querySelectorAll('.stp-wrap').forEach(wrap => {
+    let timer = null;
+    const openDrawer = () => {
+      timer = setTimeout(() => wrap.classList.add('drawer-open'), STP_HOVER_MS);
+    };
+    const cancelOpen = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+    };
+    const closeDrawer = () => {
+      cancelOpen();
+      wrap.classList.remove('drawer-open');
+    };
+    wrap.addEventListener('mouseenter', openDrawer);
+    wrap.addEventListener('mouseleave', closeDrawer);
+    wrap.addEventListener('focusin', openDrawer);
+    wrap.addEventListener('focusout', e => {
+      if (!wrap.contains(e.relatedTarget)) closeDrawer();
+    });
+  });
 
   // istatistik sayaçları
   const statIo = new IntersectionObserver(entries => {

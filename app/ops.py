@@ -5,6 +5,8 @@ Tüm uçlar kullanıcının bağlı mağazalarındaki verileri normalize edip bi
 Bağlantı anahtarları girilmemişse istemciler DEMO veriyle çalışır; arayüz aynıdır.
 """
 import json
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -83,29 +85,117 @@ def save_settings(req: OpsSettingsRequest, request: Request):
 @router.get("/overview")
 def overview(request: Request):
     clients = _clients(request)
-    orders = _collect(clients, "list_orders", days=14)
+    days_window = 30
+    orders = _collect(clients, "list_orders", days=days_window)
     products = _collect(clients, "list_products")
     questions = _collect(clients, "list_questions")
     claims = _collect(clients, "list_claims")
     threshold = load_ops_settings()["low_stock_threshold"]
+    orders_rows = orders["rows"]
 
     by_status: dict[str, int] = {}
-    revenue_14d = 0.0
-    for o in orders["rows"]:
+    revenue_30d = 0.0
+    sku_qty: dict[str, int] = defaultdict(int)
+    sku_last_qty: dict[str, int] = {}
+    for o in orders_rows:
         by_status[o["status"]] = by_status.get(o["status"], 0) + 1
         if o["status"] not in ("Cancelled", "Returned"):
-            revenue_14d += o.get("total", 0)
+            revenue_30d += o.get("total", 0)
+            for it in o.get("items") or []:
+                sku = it.get("sku") or ""
+                q = int(it.get("qty") or 1)
+                sku_qty[sku] += q
+                sku_last_qty[sku] = q
+
+    today = datetime.now().date()
+    day_keys = [(today - timedelta(days=i)).isoformat() for i in range(days_window - 1, -1, -1)]
+    daily_count = {d: 0 for d in day_keys}
+    daily_rev = {d: 0.0 for d in day_keys}
+    for o in orders_rows:
+        d = (o.get("date") or "")[:10]
+        if d not in daily_count:
+            continue
+        daily_count[d] += 1
+        if o["status"] not in ("Cancelled", "Returned"):
+            daily_rev[d] += float(o.get("total") or 0)
+
+    orders_daily = [{"date": d, "count": daily_count[d]} for d in day_keys]
+    revenue_daily = [{"date": d, "revenue": round(daily_rev[d], 2)} for d in day_keys]
+    last7_rev = sum(daily_rev[d] for d in day_keys[-7:])
+    prev7_rev = sum(daily_rev[d] for d in day_keys[-14:-7])
+    if prev7_rev > 0:
+        revenue_change_pct = round((last7_rev - prev7_rev) / prev7_rev * 100, 1)
+    else:
+        revenue_change_pct = 0.0
+
+    prod_rev: dict[str, float] = defaultdict(float)
+    for o in orders_rows:
+        if o["status"] in ("Cancelled", "Returned"):
+            continue
+        for it in o.get("items") or []:
+            name = (it.get("title") or it.get("sku") or "?")[:60]
+            prod_rev[name] += float(it.get("price") or 0) * int(it.get("qty") or 1)
+    top_products = [
+        {"name": k, "revenue": round(v, 2)}
+        for k, v in sorted(prod_rev.items(), key=lambda x: -x[1])[:3]
+    ]
+
+    recent_questions = [
+        {
+            "product": q.get("product", ""),
+            "question": (q.get("question") or "")[:90],
+            "date": (q.get("date") or "")[:16],
+        }
+        for q in questions["rows"]
+        if q.get("status") == "WAITING_FOR_ANSWER"
+    ][:4]
+
+    claim_reasons: dict[str, int] = defaultdict(int)
+    for c in claims["rows"]:
+        if c.get("status") in ("WaitingInAction", "Created", "Open"):
+            reason = (c.get("reason") or "Diğer")[:50]
+            claim_reasons[reason] += 1
+    claim_reasons_list = [
+        {"reason": k, "count": v}
+        for k, v in sorted(claim_reasons.items(), key=lambda x: -x[1])
+    ]
+
     low_stock = [p for p in products["rows"] if p["stock"] <= threshold and p["status"] == "active"]
+    for p in low_stock:
+        sku = p.get("sku") or ""
+        sold = sku_qty.get(sku, 0)
+        p["avg_daily_sales"] = round(sold / max(days_window, 1), 2)
+        p["last_order_qty"] = sku_last_qty.get(sku, 0)
+
+    recent_activity = []
+    for o in sorted(orders_rows, key=lambda x: x.get("date") or "", reverse=True)[:6]:
+        recent_activity.append({
+            "type": "order",
+            "id": o.get("order_id", ""),
+            "status": o.get("status", ""),
+            "platform": o.get("platform", "trendyol"),
+            "date": (o.get("date") or "")[:16],
+            "total": o.get("total", 0),
+        })
+
     return {
         "platforms": orders["platforms"],
         "orders_by_status": by_status,
-        "orders_total": len(orders["rows"]),
-        "revenue_14d": round(revenue_14d, 2),
+        "orders_total": len(orders_rows),
+        "revenue_30d": round(revenue_30d, 2),
+        "revenue_14d": round(revenue_30d, 2),
+        "revenue_change_pct": revenue_change_pct,
         "waiting_questions": sum(1 for q in questions["rows"] if q["status"] == "WAITING_FOR_ANSWER"),
         "open_claims": sum(1 for c in claims["rows"] if c["status"] in ("WaitingInAction", "Created", "Open")),
-        "low_stock": low_stock[:10],
+        "low_stock": low_stock[:12],
         "low_stock_count": len(low_stock),
         "threshold": threshold,
+        "orders_daily": orders_daily,
+        "revenue_daily": revenue_daily,
+        "top_products": top_products,
+        "recent_questions": recent_questions,
+        "claim_reasons": claim_reasons_list,
+        "recent_activity": recent_activity,
     }
 
 

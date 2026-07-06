@@ -15,9 +15,9 @@ from email.mime.text import MIMEText
 
 import httpx
 
-logger = logging.getLogger("trendolai.mail")
+logger = logging.getLogger("analizai.mail")
 
-MAIL_FROM = os.getenv("MAIL_FROM", "TrendolAi <onboarding@resend.dev>")
+MAIL_FROM = os.getenv("MAIL_FROM", "AnalizAi <onboarding@resend.dev>")
 SUPPORT_INBOX = os.getenv("SUPPORT_EMAIL", "trendyolai0108@gmail.com").strip()
 MAIL_DEV_LOG = os.getenv("MAIL_DEV_LOG", "").lower() in ("1", "true", "yes")
 
@@ -123,7 +123,7 @@ def _code_html(name: str, code: str) -> str:
     return f"""<!DOCTYPE html><html lang="tr"><body style="font-family:sans-serif;background:#f5f3ff;padding:32px">
 <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:16px;padding:32px">
 <h1 style="color:#2b2640;font-size:22px">Doğrulama kodun</h1>
-<p style="color:#7b7690">{greeting}<br>TrendolAi hesabını doğrulamak için aşağıdaki 5 haneli kodu gir:</p>
+<p style="color:#7b7690">{greeting}<br>AnalizAi hesabını doğrulamak için aşağıdaki 5 haneli kodu gir:</p>
 <div style="margin:24px 0;padding:18px;background:#f0edfe;border-radius:14px;text-align:center;font-size:36px;font-weight:800;letter-spacing:10px;color:#8b7cf6">{code}</div>
 <p style="color:#7b7690;font-size:13px">Kod 15 dakika geçerlidir. Bu işlemi sen yapmadıysan bu e-postayı yok say.</p>
 </div></body></html>"""
@@ -131,7 +131,7 @@ def _code_html(name: str, code: str) -> str:
 
 def _code_text(name: str, code: str) -> str:
     greeting = f"Merhaba {name}," if name else "Merhaba,"
-    return f"{greeting}\n\nTrendolAi doğrulama kodun: {code}\n\nKodu uygulamadaki doğrulama ekranına gir. Kod 15 dakika geçerlidir.\n"
+    return f"{greeting}\n\nAnalizAi doğrulama kodun: {code}\n\nKodu uygulamadaki doğrulama ekranına gir. Kod 15 dakika geçerlidir.\n"
 
 
 def send_verification_code_email(to: str, code: str, name: str = "") -> dict:
@@ -149,7 +149,7 @@ def send_verification_code_email(to: str, code: str, name: str = "") -> dict:
         )
     if provider == "smtp" and issues:
         raise RuntimeError(" ".join(issues))
-    subject = f"TrendolAi doğrulama kodun: {code}"
+    subject = f"AnalizAi doğrulama kodun: {code}"
     html, text = _code_html(name, code), _code_text(name, code)
     return _deliver(provider, to, subject, html, text)
 
@@ -166,7 +166,7 @@ def send_support_email(
     provider = _active_provider()
     if not provider:
         raise RuntimeError("E-posta servisi yapılandırılmamış.")
-    subj = f"[TrendolAi Destek] {subject}"
+    subj = f"[AnalizAi Destek] {subject}"
     safe_msg = message.strip()
     html = f"""<!DOCTYPE html><html lang="tr"><body style="font-family:sans-serif;padding:24px">
 <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #edeaf5;border-radius:14px;padding:24px">

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TrendolAi — Hesabım</title>
+<title>AnalizAi — Hesabım</title>
 <script>
   (function () {
     const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -15,6 +15,7 @@
     localStorage.setItem('theme', h.dataset.theme);
   }
 </script>
+<link rel="stylesheet" href="/static/trendol-theme.css?v=202607074400">
 <style>
   :root {
     --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
@@ -25,12 +26,22 @@
     --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
   }
   html[data-theme="dark"] {
-    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
-    --peach: #f9b17c; --peach-soft: #38291e; --sky-soft: #1c2a3a; --rose-soft: #35202c;
-    --border: #2d2749; --ok: #4ec78f;
-    --bg: #131020; --card: #1c1832; --card2: #221d3c; --line-soft: #262041;
-    --navbg: rgba(19,16,32,.9);
-    --shadow: 0 2px 8px rgba(0,0,0,.25), 0 14px 44px rgba(0,0,0,.35);
+    --ink: var(--tl-text, #ece8f8);
+    --muted: var(--tl-muted, #918ba8);
+    --lilac: var(--tl-violet, #a78bfa);
+    --lilac-soft: var(--tl-violet-dim, rgba(120, 100, 220, 0.14));
+    --peach: var(--tl-amber, #f0c27a);
+    --peach-soft: var(--tl-amber-dim, rgba(240, 194, 122, 0.12));
+    --sky-soft: var(--tl-sky-dim, rgba(142, 197, 255, 0.1));
+    --rose-soft: var(--tl-rose-dim, rgba(240, 168, 184, 0.1));
+    --border: var(--tl-border, rgba(110, 95, 180, 0.2));
+    --ok: var(--tl-pos, #5eead4);
+    --bg: var(--tl-bg, #08060f);
+    --card: var(--tl-card, #12101c);
+    --card2: var(--tl-card2, #1a1628);
+    --line-soft: #14101f;
+    --navbg: rgba(8, 6, 15, 0.92);
+    --shadow: 0 2px 8px rgba(0,0,0,.28), 0 14px 44px rgba(0,0,0,.38);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; }
@@ -47,7 +58,7 @@
     border-radius: 11px; font-weight: 700; font-size: 13.5px; padding: 9px 18px; transition: transform .2s, box-shadow .2s;
   }
   .btn:hover { transform: scale(1.04); }
-  .btn.primary { background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; box-shadow: 0 5px 16px rgba(139,124,246,.32); }
+  .btn.primary { background: linear-gradient(135deg, var(--lilac), var(--tl-teal, #2dd4bf)); color: #0a0812; box-shadow: 0 5px 16px rgba(110,231,214,.2); font-weight: 700; }
   .btn.ghost { background: var(--card); color: var(--ink); border: 1.5px solid var(--border); }
   .btn.danger { background: var(--card); color: #c0355f; border: 1.5px solid #f3cede; }
   .btn.sm { padding: 6px 13px; font-size: 12.5px; border-radius: 9px; }
@@ -109,7 +120,7 @@
 <body>
 
 <nav>
-  <a href="/" class="brand"><span class="mark">T</span>Trendol<em>Ai</em></a>
+  <a href="/" class="brand"><span class="mark">A</span>Analiz<em>Ai</em></a>
   <div class="sp">
     <button class="btn ghost" onclick="toggleTheme()" title="Tema değiştir">🌓</button>
     <a class="btn ghost" href="/panel">← Panele Dön</a>

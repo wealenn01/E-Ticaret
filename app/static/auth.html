@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TrendolAi — Giriş / Kayıt</title>
+<title>AnalizAi — Giriş / Kayıt</title>
 <script>
   (function () {
     const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -15,6 +15,7 @@
     localStorage.setItem('theme', h.dataset.theme);
   }
 </script>
+<link rel="stylesheet" href="/static/trendol-theme.css?v=202607074400">
 <style>
   :root {
     --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
@@ -23,10 +24,17 @@
     --shadow: 0 2px 8px rgba(43,38,64,.05), 0 14px 44px rgba(43,38,64,.07);
   }
   html[data-theme="dark"] {
-    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
-    --peach: #f9b17c; --peach-soft: #38291e; --border: #2d2749;
-    --bg: #131020; --card: #1c1832; --card2: #221d3c;
-    --shadow: 0 2px 8px rgba(0,0,0,.25), 0 14px 44px rgba(0,0,0,.35);
+    --ink: var(--tl-text, #ece8f8);
+    --muted: var(--tl-muted, #918ba8);
+    --lilac: var(--tl-violet, #a78bfa);
+    --lilac-soft: var(--tl-violet-dim, rgba(120, 100, 220, 0.14));
+    --peach: var(--tl-amber, #f0c27a);
+    --peach-soft: var(--tl-amber-dim, rgba(240, 194, 122, 0.12));
+    --border: var(--tl-border, rgba(110, 95, 180, 0.2));
+    --bg: var(--tl-bg, #08060f);
+    --card: var(--tl-card, #12101c);
+    --card2: var(--tl-card2, #1a1628);
+    --shadow: 0 2px 8px rgba(0,0,0,.28), 0 14px 44px rgba(0,0,0,.38);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -65,7 +73,7 @@
   .submit {
     width: 100%; margin-top: 22px; border: 0; cursor: pointer; border-radius: 12px;
     padding: 13px; font-size: 15px; font-weight: 700; color: #fff;
-    background: linear-gradient(135deg, var(--lilac), #a58ef8);
+    background: linear-gradient(135deg, var(--lilac), var(--tl-teal, #2dd4bf));
     box-shadow: 0 6px 20px rgba(139,124,246,.35); transition: transform .2s;
   }
   .submit:hover { transform: scale(1.02); }
@@ -85,7 +93,7 @@
 <body>
 
 <nav>
-  <a href="/" class="brand"><span class="mark">T</span>Trendol<em>Ai</em></a>
+  <a href="/" class="brand"><span class="mark">A</span>Analiz<em>Ai</em></a>
   <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Tema değiştir">🌓</button>
 </nav>
 

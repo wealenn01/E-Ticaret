@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google.genai import errors as genai_errors
 from pydantic import BaseModel
@@ -73,6 +73,15 @@ async def _lifespan(application):
 
 
 app = FastAPI(title="PazarAI — E-Ticaret Satış Asistanı", lifespan=_lifespan)
+
+
+@app.on_event("startup")
+def _log_assistant_routes() -> None:
+    paths = {getattr(r, "path", "") for r in app.routes}
+    if "/api/assistant/reports" in paths:
+        _logger.info("Rapor API aktif: /api/assistant/reports")
+    else:
+        _logger.error("Rapor API EKSİK — /api/assistant/reports kayıtlı değil")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth.router)
 app.include_router(billing.router)
@@ -91,10 +100,21 @@ PUBLIC_API_PREFIXES = (
 )
 
 
+def _normalize_api_path(request: Request) -> str:
+    """panel/api/... isteklerini /api/... olarak normalize eder (göreli URL hatası)."""
+    path = request.url.path
+    if path.startswith("/panel/api/"):
+        new_path = path[len("/panel"):]
+        request.scope["path"] = new_path
+        request.scope["raw_path"] = new_path.encode("utf-8")
+        return new_path
+    return path
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Korumalı /api yollarında oturum doğrular ve kullanıcı veri bağlamını kurar."""
-    path = request.url.path
+    path = _normalize_api_path(request)
     if path.startswith("/api/") and not any(path.startswith(p) for p in PUBLIC_API_PREFIXES):
         user = auth.get_session_user(request)
         if not user:
@@ -108,7 +128,12 @@ async def auth_middleware(request: Request, call_next):
         ai_seller.set_user_dir(USERS_DATA_DIR / user["id"])
     else:
         ai_seller.set_user_dir(None)
-    return await call_next(request)
+    response = await call_next(request)
+    p = request.url.path
+    if p == "/panel" or (p.startswith("/static/") and "assistant" in p):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 def _current_user(request: Request) -> dict:
@@ -262,7 +287,21 @@ def index():
 
 @app.get("/panel")
 def panel():
-    return FileResponse(BASE_DIR / "static" / "panel.html")
+    """panel.html — build meta enjekte edilir; asset URL'leri panel.html içinde sürümlenir."""
+    html_path = BASE_DIR / "static" / "panel.html"
+    html = html_path.read_text(encoding="utf-8")
+    static = BASE_DIR / "static"
+    bust = str(int(max(
+        (static / "assistant-reports.js").stat().st_mtime,
+        (static / "assistant-reports.css").stat().st_mtime,
+        (static / "assistant.js").stat().st_mtime,
+    )))
+    if '<meta name="rp-build"' not in html:
+        html = html.replace("</head>", f'<meta name="rp-build" content="{bust}">\n</head>', 1)
+    return HTMLResponse(html, headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+    })
 
 
 @app.get("/auth")
@@ -296,6 +335,9 @@ def status(request: Request):
         "email_verified": bool(user and auth.is_email_verified(user)),
         "mail_configured": mail_info["configured"],
         "mail": mail_info,
+        "panel_build": "202607072800",
+        "review_scraper_build": "ldjson-v2",
+        "reports_via_stats": True,
         **({"mail_provider": mail_info["provider"]} if user else {}),
     }
 
@@ -651,10 +693,23 @@ def _assistant_ready() -> None:
 
 
 @app.get("/api/assistant/stats")
-def assistant_stats(platform: Optional[str] = None):
+def assistant_stats(platform: Optional[str] = None, period_days: Optional[int] = None):
+    """Mağaza istatistikleri; period_days=7|15|30|90 ise dönem raporu döner."""
     _assistant_ready()
     p = platform or ai_seller.load_settings().get("platform", "trendyol")
+    if period_days in (7, 15, 30, 90):
+        plat = platform if platform in (None, "all", "trendyol", "hepsiburada", "n11", "amazon") else p
+        return ai_seller.compute_period_report(days=period_days, platform=plat)
     return ai_seller.compute_stats(ai_seller.load_reviews(), p)
+
+
+@app.get("/api/assistant/reports")
+@app.get("/panel/api/assistant/reports")
+def assistant_reports(days: int = 7, platform: Optional[str] = None):
+    """Dönemsel yorum ve iade raporu (7 / 15 / 30 gün)."""
+    _assistant_ready()
+    p = platform if platform in (None, "all", "trendyol", "hepsiburada", "n11", "amazon") else None
+    return ai_seller.compute_period_report(days=days, platform=p)
 
 
 @app.get("/api/assistant/products")
@@ -781,6 +836,13 @@ async def import_returns(file: UploadFile, request: Request):
 def delete_returns():
     ai_seller.clear_returns()
     return {"ok": True}
+
+
+@app.get("/api/assistant/returns")
+def list_returns(request: Request):
+    """İade paneli verisi — özet + son kayıtlar."""
+    billing.check_feature(_current_user(request)["id"], "returns")
+    return ai_seller.list_returns_panel()
 
 
 @app.get("/api/assistant/returns-insights")
@@ -920,3 +982,16 @@ def publish(draft: ProductDraft, request: Request):
         ok=ok, mode=trendyol.mode_name, batch_request_id=batch_id,
         batch_status=batch_status, failure_reasons=[str(f) for f in failures], message=msg,
     )
+
+
+def _reports_period_handler(days: int = 7, platform: Optional[str] = None):
+    _assistant_ready()
+    p = platform if platform in (None, "all", "trendyol", "hepsiburada", "n11", "amazon") else None
+    return ai_seller.compute_period_report(days=days, platform=p)
+
+
+_registered = {getattr(r, "path", "") for r in app.routes}
+if "/api/assistant/reports" not in _registered:
+    app.add_api_route("/api/assistant/reports", _reports_period_handler, methods=["GET"], tags=["assistant"])
+    app.add_api_route("/panel/api/assistant/reports", _reports_period_handler, methods=["GET"], tags=["assistant"])
+    _logger.warning("Rapor API add_api_route ile kaydedildi")

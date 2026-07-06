@@ -1,0 +1,236 @@
+/* AnalizAi — global tasarım tokenları (Danışman paleti, tüm proje) */
+
+:root {
+  --tl-violet: #8b7cf6;
+  --tl-violet-dim: rgba(139, 124, 246, 0.12);
+  --tl-teal: #2dd4bf;
+  --tl-teal-dim: rgba(45, 212, 191, 0.12);
+  --tl-amber: #e8a84a;
+  --tl-amber-dim: rgba(232, 168, 74, 0.12);
+  --tl-rose: #e879a0;
+  --tl-rose-dim: rgba(232, 121, 160, 0.1);
+  --tl-sky: #60a5fa;
+  --tl-sky-dim: rgba(96, 165, 250, 0.1);
+  --tl-pos: #16a34a;
+  --tl-neg: #dc2626;
+  --tl-warn: #d97706;
+
+  --tl-bg: #fbfaff;
+  --tl-bg2: #f5f3ff;
+  --tl-side: #ffffff;
+  --tl-stage: #faf9ff;
+  --tl-card: #ffffff;
+  --tl-card2: #faf9ff;
+  --tl-card-alpha: rgba(255, 255, 255, 0.92);
+  --tl-card2-alpha: rgba(250, 249, 255, 0.9);
+  --tl-border: #edeaf5;
+  --tl-border-strong: rgba(139, 124, 246, 0.35);
+  --tl-text: #2b2640;
+  --tl-muted: #7b7690;
+  --tl-radius: 12px;
+  --tl-accent: var(--tl-violet);
+
+  /* Legacy değişken eşlemesi — tüm sayfalar */
+  --ink: var(--tl-text);
+  --muted: var(--tl-muted);
+  --lilac: var(--tl-violet);
+  --lilac-dark: #7c6fe8;
+  --lilac-soft: #f0edfe;
+  --peach: var(--tl-amber);
+  --peach-soft: #fdf1e7;
+  --sky-soft: #eaf4fd;
+  --rose-soft: #fdeaf1;
+  --border: var(--tl-border);
+  --bg: var(--tl-bg);
+  --bg2: var(--tl-bg2);
+  --card: var(--tl-card);
+  --card2: var(--tl-card2);
+  --line-soft: #f5f3fb;
+  --navbg: rgba(255, 255, 255, 0.85);
+  --shadow: 0 2px 8px rgba(43, 38, 64, 0.05), 0 14px 44px rgba(43, 38, 64, 0.07);
+  --ok: var(--tl-pos);
+  --err: var(--tl-neg);
+  --warn: var(--tl-warn);
+}
+
+html[data-theme="dark"] {
+  --tl-violet: #a78bfa;
+  --tl-violet-dim: rgba(120, 100, 220, 0.14);
+  --tl-teal: #6ee7d6;
+  --tl-teal-dim: rgba(94, 234, 212, 0.14);
+  --tl-amber: #f0c27a;
+  --tl-amber-dim: rgba(240, 194, 122, 0.12);
+  --tl-rose: #f0a8b8;
+  --tl-rose-dim: rgba(240, 168, 184, 0.1);
+  --tl-sky: #8ec5ff;
+  --tl-sky-dim: rgba(142, 197, 255, 0.1);
+  --tl-pos: #5eead4;
+  --tl-neg: #fda4af;
+  --tl-warn: #fbbf24;
+
+  --tl-bg: #08060f;
+  --tl-bg2: #0e0c18;
+  --tl-side: #0e0c18;
+  --tl-stage: #05040a;
+  --tl-card: #12101c;
+  --tl-card2: #1a1628;
+  --tl-card-alpha: rgba(18, 14, 32, 0.96);
+  --tl-card2-alpha: rgba(26, 22, 42, 0.92);
+  --tl-border: rgba(110, 95, 180, 0.2);
+  --tl-border-strong: rgba(140, 120, 210, 0.32);
+  --tl-text: #ece8f8;
+  --tl-muted: #918ba8;
+  --tl-accent: var(--tl-violet);
+
+  /* Legacy değişken eşlemesi — panel.html, index, account */
+  --ink: var(--tl-text);
+  --muted: var(--tl-muted);
+  --lilac: var(--tl-violet);
+  --lilac-dark: #9580f5;
+  --lilac-soft: var(--tl-violet-dim);
+  --peach: var(--tl-amber);
+  --peach-soft: var(--tl-amber-dim);
+  --sky-soft: var(--tl-sky-dim);
+  --rose-soft: var(--tl-rose-dim);
+  --border: var(--tl-border);
+  --bg: var(--tl-bg);
+  --bg2: var(--tl-bg2);
+  --card: var(--tl-card);
+  --card2: var(--tl-card2);
+  --line-soft: #14101f;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.28), 0 12px 36px rgba(0, 0, 0, 0.38);
+  --navbg: rgba(8, 6, 15, 0.92);
+  --ok: var(--tl-pos);
+  --err: var(--tl-neg);
+  --warn: var(--tl-warn);
+}
+
+/* —— Global koyu mod iyileştirmeleri —— */
+html[data-theme="dark"] body {
+  background: var(--tl-bg);
+  color: var(--tl-text);
+}
+
+html[data-theme="dark"] .sidebar {
+  background: var(--tl-bg2);
+  border-right-color: var(--tl-border);
+}
+
+html[data-theme="dark"] .sidebar-notch {
+  background: linear-gradient(135deg, var(--tl-card), var(--tl-card2));
+  border-color: var(--tl-border);
+  color: var(--tl-violet);
+}
+
+html[data-theme="dark"] .sitem.on {
+  background: linear-gradient(135deg, var(--tl-violet) 0%, var(--tl-teal) 100%);
+  color: #0a0812;
+  box-shadow: 0 4px 18px rgba(110, 231, 214, 0.15);
+}
+
+html[data-theme="dark"] .card {
+  background: var(--tl-card-alpha);
+  border-color: var(--tl-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+html[data-theme="dark"] .drop {
+  background: var(--tl-card2-alpha);
+  border-color: var(--tl-border);
+}
+
+html[data-theme="dark"] .mini-btn.grad,
+html[data-theme="dark"] .import-tab.on,
+html[data-theme="dark"] .primary-sm,
+html[data-theme="dark"] button#analyzeBtn,
+html[data-theme="dark"] .hub-tile:focus-visible {
+  background: linear-gradient(135deg, var(--tl-violet) 0%, var(--tl-teal) 100%);
+  color: #0a0812;
+}
+
+html[data-theme="dark"] .view-assistant {
+  background: var(--tl-bg);
+}
+
+html[data-theme="dark"] body.view-assistant {
+  background: var(--tl-bg);
+}
+
+html[data-theme="dark"] .as-back-btn,
+html[data-theme="dark"] .platform-select {
+  background: var(--tl-card2-alpha);
+  border-color: var(--tl-border);
+  color: var(--tl-text);
+}
+
+html[data-theme="dark"] .hub-tile-img-wrap {
+  background: var(--tl-card2);
+}
+
+html[data-theme="dark"] .kpis .kpi,
+html[data-theme="dark"] .ov-grid .ov-kpi {
+  background: var(--tl-card-alpha);
+  border-color: var(--tl-border);
+}
+
+html[data-theme="dark"] .anl-table th {
+  background: var(--tl-card2);
+  color: var(--tl-muted);
+}
+
+html[data-theme="dark"] .anl-table td {
+  border-color: var(--tl-border);
+}
+
+/* Ortak vurgu ton sınıfları */
+.tone-violet { --tone: var(--tl-violet); --tone-dim: var(--tl-violet-dim); }
+.tone-teal { --tone: var(--tl-teal); --tone-dim: var(--tl-teal-dim); }
+.tone-amber { --tone: var(--tl-amber); --tone-dim: var(--tl-amber-dim); }
+.tone-rose { --tone: var(--tl-rose); --tone-dim: var(--tl-rose-dim); }
+.tone-sky { --tone: var(--tl-sky); --tone-dim: var(--tl-sky-dim); }
+
+.tl-gradient-text {
+  background: linear-gradient(90deg, var(--tl-violet), var(--tl-teal) 55%, var(--tl-amber));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.tl-btn-primary {
+  background: linear-gradient(135deg, var(--tl-violet) 0%, var(--tl-teal) 100%);
+  color: #0a0812;
+  border: 0;
+  font-weight: 700;
+}
+
+html[data-theme="dark"] .consultant-badge {
+  background: var(--tl-violet-dim);
+  color: var(--tl-violet);
+  border: 1px solid var(--tl-border-strong);
+  border-radius: 8px;
+}
+
+/* Landing / auth — gradient CTA */
+html[data-theme="dark"] .btn-primary,
+html[data-theme="dark"] .cta-btn,
+html[data-theme="dark"] .hero-cta {
+  background: linear-gradient(135deg, var(--tl-violet) 0%, var(--tl-teal) 100%);
+  color: #0a0812;
+  box-shadow: 0 6px 22px rgba(110, 231, 214, 0.12);
+}
+
+.btn-primary,
+.cta-btn,
+.hero-cta {
+  background: linear-gradient(135deg, var(--tl-violet) 0%, var(--tl-teal) 100%);
+  color: #0a0812;
+}
+
+html[data-theme="dark"] nav {
+  background: var(--navbg);
+  border-bottom-color: var(--tl-border);
+}
+
+html[data-theme="dark"] .brand .mark {
+  background: linear-gradient(135deg, var(--tl-violet), var(--tl-amber));
+}

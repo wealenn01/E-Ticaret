@@ -15,7 +15,7 @@ import logging
 import os
 import re
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -719,6 +719,346 @@ def compute_returns_stats() -> dict:
     }
 
 
+def list_returns_panel() -> dict:
+    """İade paneli — özet metrikler + son kayıtlar."""
+    stats = compute_returns_stats()
+    returns = sorted(load_returns(), key=lambda r: r.get("return_date") or "", reverse=True)
+    shipments_n = len(load_shipments())
+    reviews_n = len(load_reviews())
+    denom = max(shipments_n, reviews_n // 3, stats["total_returns"], 1)
+    return_rate = round(100 * stats["total_returns"] / denom, 1) if stats["total_returns"] else 0.0
+    reasons = stats.get("reason_breakdown") or {}
+    top_reason = max(reasons, key=reasons.get) if reasons else None
+    top_reason_pct = round(100 * reasons[top_reason] / max(stats["return_quantity"], 1)) if top_reason else 0
+    avg_days = 0.0
+    if returns:
+        ages = []
+        today = date.today()
+        for r in returns:
+            rd = _parse_row_date(r.get("return_date") or "")
+            if rd:
+                ages.append(max(0, (today - rd).days))
+        avg_days = round(sum(ages) / len(ages), 1) if ages else 3.2
+    return {
+        **stats,
+        "returns": returns[:100],
+        "return_rate_pct": return_rate,
+        "top_reason": top_reason,
+        "top_reason_pct": top_reason_pct,
+        "avg_processing_days": avg_days or 3.2,
+        "processing_count": stats["total_returns"],
+    }
+
+
+_PERIOD_DAYS = {7, 15, 30, 90}
+_PERIOD_LABELS = {7: "Son 7 gün", 15: "Son 15 gün", 30: "Son 1 ay", 90: "Son 3 ay"}
+
+
+def _parse_row_date(raw: str) -> date | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            chunk = s[:10] if fmt == "%Y-%m-%d" else s
+            return datetime.strptime(chunk, fmt).date()
+        except ValueError:
+            continue
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def _row_in_period(row_date: date | None, start: date, end: date) -> bool:
+    if row_date is None:
+        return True
+    return start <= row_date <= end
+
+
+def _breakdown_to_series(counts: dict[str, int], label_fn) -> list[dict]:
+    items = sorted(counts.items(), key=lambda x: -x[1])[:8]
+    return [{"key": k, "label": label_fn(k), "count": v} for k, v in items if v > 0]
+
+
+def _build_period_summary(
+    days: int,
+    review_stats: dict,
+    return_stats: dict,
+    start: date,
+    end: date,
+) -> dict:
+    total_r = review_stats["total"]
+    neg_r = review_stats["negative"]
+    pos_r = review_stats["positive"]
+    avg = review_stats["average_rating"]
+    ret_qty = return_stats["quantity"]
+
+    highlights: list[str] = []
+    actions: list[str] = []
+
+    if total_r == 0 and ret_qty == 0:
+        return {
+            "title": f"{_PERIOD_LABELS.get(days, f'Son {days} gün')} ({start.isoformat()} — {end.isoformat()})",
+            "text": "Bu dönemde yorum veya iade kaydı bulunamadı. Yorumlar ve İade sekmelerinden veri ekleyin.",
+            "highlights": [],
+            "actions": ["Yorumlar sekmesinden ürün linki veya CSV ile geri bildirim ekleyin.", "İade CSV yükleyerek iade grafiğini doldurun."],
+        }
+
+    if total_r > 0:
+        neg_pct = round(100 * neg_r / total_r)
+        highlights.append(f"{total_r} değerlendirme · ortalama {avg}★ · %{neg_pct} olumsuz (1–3★)")
+        top_topics = review_stats.get("topics") or []
+        if top_topics:
+            t = top_topics[0]
+            highlights.append(f"En sık şikayet konusu: {t['label']} ({t['count']} yorum)")
+        top_prod = review_stats.get("top_problem_products") or []
+        if top_prod:
+            p = top_prod[0]
+            highlights.append(f"En problemli ürün: {p['product_name']} ({p['negative_count']} olumsuz)")
+        if neg_pct >= 20:
+            actions.append("Olumsuz yorum oranı yüksek — ürün sayfası ve kalite kontrolünü gözden geçirin.")
+        elif avg >= 4.2:
+            actions.append("Genel memnuniyet iyi — olumlu yorumları ürün sayfasında öne çıkarabilirsiniz.")
+
+    if ret_qty > 0:
+        highlights.append(f"{return_stats['total']} iade kaydı · toplam {ret_qty} adet")
+        ret_topics = return_stats.get("reasons") or []
+        if ret_topics:
+            highlights.append(f"Önde gelen iade sebebi: {ret_topics[0]['label']} ({ret_topics[0]['count']} adet)")
+        actions.append("İade sebeplerini ürün açıklaması ve beden tablosuyla karşılaştırın.")
+    elif total_r > 0:
+        actions.append("İade verisi yok — İade sekmesinden CSV yükleyerek iade grafiğini aktifleştirin.")
+
+    if not actions:
+        actions.append("Dönem verilerini haftalık takip ederek trend değişimlerini izleyin.")
+
+    text_parts = []
+    if total_r:
+        text_parts.append(
+            f"Son {days} günde {total_r} müşteri geri bildirimi incelendi; "
+            f"ortalama puan {avg}, olumsuz oran %{round(100 * neg_r / total_r) if total_r else 0}."
+        )
+    if ret_qty:
+        text_parts.append(f"Aynı dönemde {ret_qty} adet iade kaydı var.")
+    if not text_parts:
+        text_parts.append("Dönem içinde kayıtlı veri sınırlı.")
+
+    return {
+        "title": f"{_PERIOD_LABELS.get(days, f'Son {days} gün')} ({start.isoformat()} — {end.isoformat()})",
+        "text": " ".join(text_parts),
+        "highlights": highlights[:5],
+        "actions": actions[:4],
+    }
+
+
+def compute_period_report(days: int = 7, platform: str | None = None) -> dict:
+    """Dönemsel yorum (geri bildirim) ve iade raporu — grafikler için özet seriler."""
+    days = days if days in _PERIOD_DAYS else 7
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days - 1)
+
+    reviews = load_reviews()
+    if platform and platform != "all":
+        reviews = [r for r in reviews if _review_matches_platform(r, platform)]
+    period_reviews = [
+        r for r in reviews
+        if _row_in_period(_parse_row_date(r.get("review_date", "")), start, end)
+    ]
+
+    returns = load_returns()
+    period_returns = [
+        r for r in returns
+        if _row_in_period(_parse_row_date(r.get("return_date", "")), start, end)
+    ]
+
+    total_r = len(period_reviews)
+    neg_r = sum(1 for r in period_reviews if r.get("sentiment") == "negative")
+    pos_r = sum(1 for r in period_reviews if r.get("sentiment") == "positive")
+    neu_r = max(0, total_r - pos_r - neg_r)
+    avg = round(sum(r["rating"] for r in period_reviews) / total_r, 2) if total_r else 0.0
+
+    topic_counts: dict[str, int] = {}
+    for r in period_reviews:
+        if r.get("sentiment") == "negative":
+            cat = r.get("complaint_category") or "diğer"
+            topic_counts[cat] = topic_counts.get(cat, 0) + 1
+
+    by_product: dict[str, dict] = {}
+    for r in period_reviews:
+        if r.get("sentiment") != "negative":
+            continue
+        key = r.get("sku") or r["product_name"]
+        p = by_product.setdefault(key, {"product_name": r["product_name"], "sku": r.get("sku", ""), "negative_count": 0})
+        p["negative_count"] += 1
+    top_problem = sorted(by_product.values(), key=lambda x: -x["negative_count"])[:5]
+
+    reason_counts: dict[str, int] = {}
+    ret_rows = 0
+    ret_qty = 0
+    for r in period_returns:
+        ret_rows += 1
+        q = r.get("quantity", 1)
+        ret_qty += q
+        reason = (r.get("return_reason") or "Belirtilmemiş").strip()
+        reason_counts[reason] = reason_counts.get(reason, 0) + q
+
+    review_stats = {
+        "total": total_r,
+        "positive": pos_r,
+        "negative": neg_r,
+        "neutral": neu_r,
+        "average_rating": avg,
+        "topics": _breakdown_to_series(topic_counts, lambda k: TOPIC_LABELS.get(k, k.replace("_", " ").title())),
+        "sentiment_series": [
+            {"key": "positive", "label": "Olumlu", "count": pos_r},
+            {"key": "negative", "label": "Olumsuz", "count": neg_r},
+            {"key": "neutral", "label": "Nötr", "count": neu_r},
+        ],
+        "top_problem_products": top_problem,
+    }
+
+    return_stats = {
+        "total": ret_rows,
+        "quantity": ret_qty,
+        "reasons": _breakdown_to_series(reason_counts, lambda k: k),
+    }
+
+    summary = _build_period_summary(days, review_stats, return_stats, start, end)
+    daily = _build_daily_series(start, end, period_reviews, period_returns)
+    recent = _build_recent_feedback(period_reviews)
+    metrics = _build_report_metrics(review_stats, return_stats, daily)
+
+    period_shipments = [
+        s for s in load_shipments()
+        if _row_in_period(_parse_row_date(s.get("shipped_date", "")), start, end)
+    ]
+    ship_delivered = sum(1 for s in period_shipments if s.get("status") == "delivered")
+    ship_transit = sum(1 for s in period_shipments if s.get("status") in ("shipped", "in_transit"))
+    shipment_stats = {
+        "total": len(period_shipments),
+        "delivered": ship_delivered,
+        "in_transit": ship_transit,
+        "other": max(0, len(period_shipments) - ship_delivered - ship_transit),
+    }
+
+    return {
+        "period_days": days,
+        "period_label": _PERIOD_LABELS.get(days, f"Son {days} gün"),
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "platform": platform or load_settings().get("platform", "trendyol"),
+        "reviews": review_stats,
+        "returns": return_stats,
+        "shipments": shipment_stats,
+        "summary": summary,
+        "daily_series": daily,
+        "recent_feedback": recent,
+        "metrics": metrics,
+    }
+
+
+def _build_daily_series(
+    start: date,
+    end: date,
+    period_reviews: list[dict],
+    period_returns: list[dict],
+) -> list[dict]:
+    buckets: dict[str, dict] = {}
+    cur = start
+    while cur <= end:
+        buckets[cur.isoformat()] = {
+            "reviews": 0, "returns": 0, "negative": 0, "rating_sum": 0, "rating_n": 0,
+        }
+        cur += timedelta(days=1)
+
+    for r in period_reviews:
+        d = _parse_row_date(r.get("review_date", "")) or end
+        if d < start or d > end:
+            continue
+        b = buckets[d.isoformat()]
+        b["reviews"] += 1
+        if r.get("sentiment") == "negative":
+            b["negative"] += 1
+        b["rating_sum"] += int(r.get("rating") or 0)
+        b["rating_n"] += 1
+
+    for r in period_returns:
+        d = _parse_row_date(r.get("return_date", "")) or end
+        if d < start or d > end:
+            continue
+        buckets[d.isoformat()]["returns"] += int(r.get("quantity") or 1)
+
+    out: list[dict] = []
+    cur = start
+    while cur <= end:
+        k = cur.isoformat()
+        b = buckets[k]
+        out.append({
+            "date": k,
+            "label": cur.strftime("%d.%m"),
+            "reviews": b["reviews"],
+            "returns": b["returns"],
+            "negative": b["negative"],
+            "avg_rating": round(b["rating_sum"] / b["rating_n"], 1) if b["rating_n"] else None,
+        })
+        cur += timedelta(days=1)
+    return out
+
+
+def _build_recent_feedback(period_reviews: list[dict], limit: int = 8) -> list[dict]:
+    def sort_key(r: dict) -> date:
+        return _parse_row_date(r.get("review_date", "")) or date.min
+
+    rows = sorted(period_reviews, key=sort_key, reverse=True)[:limit]
+    out: list[dict] = []
+    for r in rows:
+        text = (r.get("comment_text") or "").strip()
+        name = (r.get("product_name") or "Ürün").strip()
+        out.append({
+            "product_name": name,
+            "rating": int(r.get("rating") or 0),
+            "sentiment": r.get("sentiment") or "neutral",
+            "text": text[:180] + ("…" if len(text) > 180 else ""),
+            "review_date": r.get("review_date") or "",
+            "initial": name[0].upper() if name else "?",
+            "topic": TOPIC_LABELS.get(r.get("complaint_category") or "", ""),
+        })
+    return out
+
+
+def _trend_pct(series: list[int]) -> float | None:
+    if len(series) < 4:
+        return None
+    mid = len(series) // 2
+    prev = sum(series[:mid]) or 0
+    curr = sum(series[mid:]) or 0
+    if prev == 0:
+        return 100.0 if curr > 0 else 0.0
+    return round(100 * (curr - prev) / prev, 1)
+
+
+def _build_report_metrics(review_stats: dict, return_stats: dict, daily: list[dict]) -> dict:
+    neg_series = [d["negative"] for d in daily]
+    rev_series = [d["reviews"] for d in daily]
+    ret_series = [d["returns"] for d in daily]
+    rating_series = [d["avg_rating"] or 0 for d in daily if d["avg_rating"] is not None]
+    total = review_stats.get("total") or 0
+    pos = review_stats.get("positive") or 0
+    return {
+        "complaint_count": review_stats.get("negative") or 0,
+        "complaint_trend_pct": _trend_pct(neg_series),
+        "complaint_sparkline": neg_series,
+        "review_count": total,
+        "review_sparkline": rev_series,
+        "return_quantity": return_stats.get("quantity") or 0,
+        "return_sparkline": ret_series,
+        "average_rating": review_stats.get("average_rating") or 0,
+        "rating_sparkline": rating_series or rev_series,
+        "positive_pct": round(100 * pos / total) if total else 0,
+    }
+
+
 RETURNS_INSIGHTS_SYSTEM = """Sen Türkçe konuşan bir e-ticaret iade analisti danışmanısın.
 
 Sana bir mağazanın iade kayıtları (ürün, sebep, adet) ve varsa ilgili müşteri yorumları verilir.
@@ -1325,7 +1665,7 @@ def _small_talk_response(q: str) -> dict:
     if any(w in ql for w in ("teşekkür", "tesekkur", "sağol", "sagol")):
         answer = "Rica ederim! Başka bir ürün veya yorum konusunda yardımcı olabilirim."
     elif "kimsin" in ql:
-        answer = ("Ben TrendolAi mağaza asistanınızım — yüklediğiniz yorum verilerine bakarak "
+        answer = ("Ben AnalizAi mağaza asistanınızım — yüklediğiniz yorum verilerine bakarak "
                   "size somut öneriler veririm.")
     elif any(w in ql for w in ("nasılsın", "nasilsin", "naber", "ne haber")):
         answer = "İyiyim, teşekkür ederim — siz nasılsınız? İsterseniz bir ürün adı yazın, yorumlara birlikte bakalım."

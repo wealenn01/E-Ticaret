@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TrendolAi — E-posta Doğrulama</title>
+<title>AnalizAi — E-posta Doğrulama</title>
 <script>
   (function () {
     const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     document.documentElement.dataset.theme = t;
   })();
 </script>
+<link rel="stylesheet" href="/static/trendol-theme.css?v=202607074400">
 <style>
   :root {
     --ink: #2b2640; --muted: #7b7690; --lilac: #8b7cf6; --lilac-soft: #f0edfe;
@@ -18,8 +19,13 @@
     --ok: #2d9a6a; --err: #b3305f;
   }
   html[data-theme="dark"] {
-    --ink: #ebe8f7; --muted: #9a94b8; --lilac: #9d8ffa; --lilac-soft: #2b2547;
-    --border: #2d2749; --bg: #131020; --card: #1c1832;
+    --ink: var(--tl-text, #ece8f8);
+    --muted: var(--tl-muted, #918ba8);
+    --lilac: var(--tl-violet, #a78bfa);
+    --lilac-soft: var(--tl-violet-dim, rgba(120, 100, 220, 0.14));
+    --border: var(--tl-border, rgba(110, 95, 180, 0.2));
+    --bg: var(--tl-bg, #08060f);
+    --card: var(--tl-card, #12101c);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: linear-gradient(160deg, var(--bg) 40%, var(--lilac-soft)); color: var(--ink); min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
@@ -36,7 +42,7 @@
   .code-row input { width: 48px; height: 56px; text-align: center; font-size: 24px; font-weight: 800; border: 2px solid var(--border); border-radius: 12px; outline: none; background: #fff; color: var(--ink); }
   html[data-theme="dark"] .code-row input { background: var(--lilac-soft); }
   .code-row input:focus { border-color: var(--lilac); }
-  .btn { display: inline-block; border: 0; cursor: pointer; border-radius: 12px; padding: 12px 22px; font-size: 14px; font-weight: 700; color: #fff; margin: 6px; background: linear-gradient(135deg, var(--lilac), #a58ef8); box-shadow: 0 6px 20px rgba(139,124,246,.35); }
+  .btn { display: inline-block; border: 0; cursor: pointer; border-radius: 12px; padding: 12px 22px; font-size: 14px; font-weight: 700; color: #0a0812; margin: 6px; background: linear-gradient(135deg, var(--lilac), var(--tl-teal, #2dd4bf)); box-shadow: 0 6px 20px rgba(110,231,214,.2); }
   .btn:disabled { opacity: .6; cursor: wait; }
   .btn.ghost { background: transparent; color: var(--muted); box-shadow: none; border: 1.5px solid var(--border); }
   .msg { display: none; margin-top: 16px; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
@@ -55,7 +61,7 @@
 </style>
 </head>
 <body>
-<nav><a class="brand" href="/"><span class="mark">T</span> Trendol<em>Ai</em></a></nav>
+<nav><a class="brand" href="/"><span class="mark">A</span> Analiz<em>Ai</em></a></nav>
 <div class="card">
   <div class="icon">📬</div>
   <h1>E-postanı doğrula</h1>
