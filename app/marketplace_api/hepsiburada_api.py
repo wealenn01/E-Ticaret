@@ -155,7 +155,8 @@ class HepsiburadaAPI(B.MarketplaceClient):
         # OMS iade/talep servisi merchant bazında ayrıca açtırılır.
         raise B.NotSupported("Hepsiburada iade API'si hesabınızda aktif değilse entegrasyon ekibinden açtırmanız gerekir.")
 
-    def review_claim(self, claim_id: str, approve: bool, reason: str = "") -> dict:
+    def review_claim(self, claim_id: str, approve: bool, reason: str = "",
+                     claim_item_ids: Optional[list[str]] = None) -> dict:
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"İade {'onaylandı' if approve else 'reddedildi'} (DEMO)."}

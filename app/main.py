@@ -650,6 +650,25 @@ def _assistant_ready() -> None:
     ai_seller.ensure_starter_data()
 
 
+@app.post("/api/assistant/seed-demo-store")
+def seed_demo_store(request: Request):
+    """Mağaza ürünlerine uygun örnek yorum ve analiz verisi yükler."""
+    user = _current_user(request)
+    creds = None
+    for row in marketplaces.list_user_connections(user["id"]):
+        if row["platform"] == "trendyol":
+            creds = db.connection_credentials(row)
+            break
+    result = ai_seller.seed_store_demo(creds)
+    n_rev = result.get("reviews", 0)
+    n_prod = result.get("store_products", 0)
+    msg = (
+        f"{n_rev} örnek yorum yüklendi ({n_prod} mağaza ürününe göre)."
+        if n_prod else f"{n_rev} örnek yorum ve sipariş verisi yüklendi."
+    )
+    return {"ok": True, "message": msg, **result}
+
+
 @app.get("/api/assistant/stats")
 def assistant_stats(platform: Optional[str] = None):
     _assistant_ready()

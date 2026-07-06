@@ -38,8 +38,8 @@
     const r = await fetch(url, opts);
     const text = await r.text();
     let data;
-    try { data = JSON.parse(text); } catch { throw new Error("Sunucu hatası (" + r.status + ")"); }
-    if (!r.ok) throw new Error(formatApiError(data.detail) || "İstek başarısız");
+    try { data = JSON.parse(text); } catch { const e = new Error("Sunucu hatası (" + r.status + ")"); e.status = r.status; throw e; }
+    if (!r.ok) { const e = new Error(formatApiError(data.detail) || "İstek başarısız"); e.status = r.status; throw e; }
     return data;
   }
 
@@ -171,6 +171,8 @@
         <button class="import-tab${state.importMode === "link" ? " on" : ""}" data-mode="link">Link ile çek</button>
         <button class="import-tab${state.importMode === "csv" ? " on" : ""}" data-mode="csv">CSV ile</button>
       </div>
+      <p class="hint" style="margin:10px 0 6px">Hızlı başlamak için mağazanıza uygun örnek yorum ve sipariş verisi:</p>
+      <button type="button" class="mini-btn" id="seedDemoBtn">Örnek veri yükle</button>
       ${state.importMode === "link" ? linkPanel : csvPanel}`;
 
     $("importPanel").querySelectorAll(".import-tab").forEach(t => t.onclick = () => {
@@ -182,6 +184,18 @@
   }
 
   function bindImportEvents() {
+    const seedBtn = $("seedDemoBtn");
+    if (seedBtn) {
+      seedBtn.onclick = async () => {
+        seedBtn.disabled = true; seedBtn.textContent = "Yükleniyor…";
+        try {
+          const r = await api("/api/assistant/seed-demo-store", { method: "POST" });
+          toast(r.message || "Örnek veri yüklendi", "ok");
+          await refreshData();
+        } catch (e) { toast(e.message, "err"); }
+        finally { seedBtn.disabled = false; seedBtn.textContent = "Örnek veri yükle"; }
+      };
+    }
     const scrapeBtn = $("scrapeSubmitBtn");
     if (scrapeBtn) {
       scrapeBtn.onclick = async () => {
@@ -325,11 +339,13 @@
         document.querySelectorAll(".platform-select").forEach(s => { s.value = state.platform; });
         state.expandedSku = null;
         state.selectedSku = null;
-        await api("/api/assistant/settings", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ platform: state.platform }),
-        });
-        await refreshData();
+        try {
+          await api("/api/assistant/settings", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ platform: state.platform }),
+          });
+          await refreshData();
+        } catch (e) { toast(e.message, "err"); }
       };
     });
   }
@@ -391,7 +407,7 @@
     const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
     const dataHint = dataCount > 0
       ? `${dataCount} yorum üzerinden analiz yapılır${consultantProducts.length ? ` · ${consultantProducts.length} ürün` : ""}.`
-      : "Henüz veri yok — Yorumlar sekmesinden link/CSV ile ekleyin veya demo hesap açın.";
+      : "Henüz veri yok — Yorumlar sekmesinden link veya CSV ile yorum ekleyin ya da örnek veri yükleyin.";
 
     $("productPicker").innerHTML = `
       <strong>Ürün seçin (isteğe bağlı)</strong>
@@ -443,7 +459,7 @@
           </div>
         </div>`;
       } else {
-        chartsEl.innerHTML = '<p class="hint">Grafikler için yorum verisi gerekir — Yorumlar sekmesinden link/CSV ile ekleyin veya demo hesap kullanın.</p>';
+        chartsEl.innerHTML = '<p class="hint">Grafikler için yorum verisi gerekir — Yorumlar sekmesinden link veya CSV ile ekleyin ya da örnek veri yükleyin.</p>';
       }
     }
     const insightsEl = $("insightsBlock");
@@ -489,7 +505,7 @@
       extra += `<ul class="consultant-evidence-list">${d.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul>`;
     }
     if (d.price_comparison?.length) {
-      extra += `<div class="price-compare-block"><strong>Hepsiburada fiyat listesi</strong><table class="ship-table"><thead><tr><th>Ürün</th><th>Fiyat</th><th>Satıcı</th></tr></thead><tbody>${d.price_comparison.map(row => `<tr><td>${row.url ? `<a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.name)}</a>` : esc(row.name)}</td><td>${Number(row.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL</td><td>${esc(row.merchant || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+      extra += `<div class="price-compare-block"><strong>Pazaryeri fiyat karşılaştırması</strong><table class="ship-table"><thead><tr><th>Ürün</th><th>Fiyat</th><th>Satıcı</th></tr></thead><tbody>${d.price_comparison.map(row => `<tr><td>${row.url ? `<a href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.name)}</a>` : esc(row.name)}</td><td>${Number(row.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} TL</td><td>${esc(row.merchant || "—")}</td></tr>`).join("")}</tbody></table></div>`;
     }
     if (d.review_benchmark) {
       const b = d.review_benchmark;
@@ -501,7 +517,15 @@
   async function loadPresets() {
     const consultantProducts = state.allProducts.length ? state.allProducts : state.products;
     const selected = state.selectedSku ? consultantProducts.find(p => p.sku === state.selectedSku) : null;
-    const groups = await api("/api/assistant/presets" + (selected ? "?product_name=" + encodeURIComponent(selected.product_name) : ""));
+    let groups;
+    try {
+      groups = await api("/api/assistant/presets" + (selected ? "?product_name=" + encodeURIComponent(selected.product_name) : ""));
+    } catch (e) {
+      const el = $("presetGroups");
+      if (el) el.innerHTML = `<p class="hint err">Hazır sorular yüklenemedi: ${esc(e.message)}</p>`;
+      return;
+    }
+    if (!$("presetGroups")) return;
     $("presetGroups").innerHTML = groups.map(g => `
       <section class="preset-group">
         <h4>${esc(g.title)}</h4>
@@ -587,15 +611,30 @@
   }
 
   async function loadShipments() {
-    const d = await api("/api/assistant/shipments");
-    const totals = { total: d.total, in_transit: d.in_transit, delivered: d.delivered };
+    let d;
+    try {
+      d = await api("/api/assistant/shipments");
+    } catch (e) {
+      const wrap = $("shipTableWrap");
+      const metrics = $("shipMetrics");
+      if (metrics) metrics.innerHTML = "";
+      if (wrap) {
+        wrap.innerHTML = e.status === 402
+          ? `<p class="hint">${esc(e.message)} <a href="/account">Paketleri gör →</a></p>`
+          : `<p class="hint err">Kargo verisi yüklenemedi: ${esc(e.message)}</p>`;
+      }
+      return;
+    }
+    const labels = d.status_labels || {};
     $("shipMetrics").innerHTML = `
-      <div class="metric-card"><div class="l">Toplam sipariş</div><div class="v">${totals.total}</div></div>
-      <div class="metric-card warn"><div class="l">Yolda</div><div class="v">${totals.in_transit}</div></div>
-      <div class="metric-card pos"><div class="l">Teslim</div><div class="v">${totals.delivered}</div></div>`;
+      <div class="metric-card"><div class="l">Toplam sipariş</div><div class="v">${d.total}</div></div>
+      <div class="metric-card warn"><div class="l">Yolda</div><div class="v">${d.in_transit}</div></div>
+      <div class="metric-card pos"><div class="l">Teslim</div><div class="v">${d.delivered}</div></div>`;
 
     if (!d.shipments?.length) {
       $("shipTableWrap").innerHTML = '<p class="hint">Henüz kargo kaydı yok. Kargo CSV yükleyin.</p>';
+      const cf = $("shipCarrierFilter");
+      if (cf) cf.innerHTML = '<option value="all">Tüm firmalar</option>';
       return;
     }
 
@@ -607,7 +646,12 @@
     if (carrierFilter !== "all") rows = rows.filter(s => s.carrier === carrierFilter);
 
     const carriers = [...new Set(d.shipments.map(s => s.carrier).filter(Boolean))].sort();
-    $("shipCarrierFilter").innerHTML = `<option value="all">Tüm firmalar</option>${carriers.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")}`;
+    const cf = $("shipCarrierFilter");
+    if (cf) {
+      const keep = carriers.includes(carrierFilter) ? carrierFilter : "all";
+      cf.innerHTML = `<option value="all">Tüm firmalar</option>${carriers.map(c => `<option value="${esc(c)}"${c === keep ? " selected" : ""}>${esc(c)}</option>`).join("")}`;
+      cf.value = keep;
+    }
 
     $("shipTableWrap").innerHTML = `
       <p class="hint ship-count-line">${rows.length} / ${d.shipments.length} sipariş gösteriliyor</p>
@@ -621,7 +665,7 @@
             <td>${esc(s.product_name)}<br><span class="hint">${esc(s.sku)}</span></td>
             <td>${esc(s.carrier)}</td>
             <td>${url ? `<a href="${url}" target="_blank" rel="noopener">${esc(s.tracking_number)}</a>` : esc(s.tracking_number)}</td>
-            <td><span class="st-badge st-${s.status}">${d.status_labels[s.status] || s.status}</span></td>
+            <td><span class="st-badge st-${esc(s.status)}">${esc(labels[s.status] || s.status)}</span></td>
             <td>${esc(s.shipped_date) || "—"}</td>
             <td>${s.delivered_date ? esc(s.delivered_date) : (days !== null ? days + " gündür yolda" : "—")}</td>
           </tr>`;

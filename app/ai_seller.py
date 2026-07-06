@@ -427,6 +427,84 @@ def seed_sample_data(*, include_orders: bool = False) -> dict:
     return out
 
 
+def seed_store_demo(trendyol_creds: Optional[dict] = None) -> dict:
+    """Bağlı mağaza ürünlerine göre örnek yorum + sipariş/iade verisi yükler."""
+    from datetime import date, timedelta
+
+    out = seed_sample_data(include_orders=True)
+    products: list[dict] = []
+    if trendyol_creds:
+        try:
+            from .marketplace_api.trendyol_api import TrendyolAPI
+            api = TrendyolAPI(trendyol_creds)
+            if api.configured:
+                products = api.list_products(size=12)
+        except Exception:
+            logger.exception("Mağaza ürünleri alınamadı")
+
+    if not products and trendyol_creds:
+        # API erişilemezse stage test mağazasındaki bilinen ürünlerle doldur
+        products = [
+            {"title": "Beşiktaşlı Sağır Rıfat Usta A+ Kalite Abanoz Tesbih", "sku": "TSB-2026-JSD0JZ"},
+            {"title": "Atlas Bot Kahverengi", "sku": "TY-C12-LUMBER"},
+            {"title": "Colourist Şalyaka Bornoz - Antrasit S/M", "sku": "ymkcolourist15"},
+            {"title": "Colourist Şalyaka Bornoz Havlu 50x90 - Antrasit L", "sku": "TYBV76VW4FR5QHZP76"},
+            {"title": "Ali Eriş Usta A+ Kalite Damla Kehribar Tesbih 7x11", "sku": "TSB-2026-TG8JO8"},
+        ]
+
+    templates = [
+        (5, "Ürün beklediğim gibi geldi, memnun kaldım.", "positive", "kalite"),
+        (4, "Kaliteli ürün, kargo hızlıydı.", "positive", "kargo"),
+        (3, "Fotoğraftaki renk biraz farklı ama kullanılabilir.", "neutral", "urun_bilgisi"),
+        (2, "Paketleme zayıftı, kutu ezilmişti.", "negative", "paketleme"),
+        (1, "Beden tam oturmadı, iade düşünüyorum.", "negative", "beden"),
+    ]
+    base = date.today()
+    reviews: list[dict] = []
+    for pi, p in enumerate(products):
+        name = (p.get("title") or p.get("product") or "Ürün").strip()
+        sku = (p.get("sku") or f"SKU-{pi}").strip()
+        for ti, (rating, text, sent, cat) in enumerate(templates[: 3 + (pi % 3)]):
+            reviews.append({
+                "product_name": name,
+                "sku": sku,
+                "rating": rating,
+                "comment_text": text,
+                "review_date": (base - timedelta(days=pi * 2 + ti + 1)).isoformat(),
+                "sentiment": sent,
+                "complaint_category": cat,
+                "platform": "trendyol",
+            })
+    save_reviews(reviews)
+    out["reviews"] = len(reviews)
+    out["store_products"] = len(products)
+
+    return_reasons = ["Beden uymadı", "Vazgeçtim", "Ürün hasarlı", "Yanlış ürün gönderildi", "Kargo gecikmesi"]
+    returns = load_returns()
+    existing = {(r.get("sku"), r.get("return_reason"), r.get("return_date")) for r in returns}
+    for pi, p in enumerate(products):
+        name = (p.get("title") or p.get("product") or "Ürün").strip()
+        sku = (p.get("sku") or f"SKU-{pi}").strip()
+        reason = return_reasons[pi % len(return_reasons)]
+        rdate = (base - timedelta(days=pi * 3 + 2)).isoformat()
+        key = (sku, reason, rdate)
+        if key in existing:
+            continue
+        returns.append({
+            "product_name": name,
+            "sku": sku,
+            "return_reason": reason,
+            "return_date": rdate,
+            "quantity": 1,
+        })
+        existing.add(key)
+    if returns:
+        _returns_file().write_text(json.dumps(returns, ensure_ascii=False, indent=1), encoding="utf-8")
+        out["returns"] = len(returns)
+
+    return out
+
+
 def ensure_starter_data(*, force: bool = False) -> dict:
     """Asistan verisi yoksa örnek mağaza verisini otomatik yükler (tüm kullanıcılar)."""
     if not force:

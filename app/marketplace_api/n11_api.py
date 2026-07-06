@@ -158,7 +158,8 @@ class N11API(B.MarketplaceClient):
             return self._tag(B.demo_claims("N11-"))
         raise B.NotSupported("N11 iade yönetimi REST API'de sınırlı — Satıcı Ofisi'nden yönetilir.")
 
-    def review_claim(self, claim_id: str, approve: bool, reason: str = "") -> dict:
+    def review_claim(self, claim_id: str, approve: bool, reason: str = "",
+                     claim_item_ids: Optional[list[str]] = None) -> dict:
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"İade {'onaylandı' if approve else 'reddedildi'} (DEMO)."}

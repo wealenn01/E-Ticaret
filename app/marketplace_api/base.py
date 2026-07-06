@@ -56,7 +56,8 @@ class MarketplaceClient:
     def list_claims(self) -> list[dict]:
         raise NotSupported(f"{self.platform_name}: iade listeleme desteklenmiyor")
 
-    def review_claim(self, claim_id: str, approve: bool, reason: str = "") -> dict:
+    def review_claim(self, claim_id: str, approve: bool, reason: str = "",
+                     claim_item_ids: Optional[list[str]] = None) -> dict:
         raise NotSupported(f"{self.platform_name}: iade onay/red desteklenmiyor")
 
     def list_questions(self, status: Optional[str] = None) -> list[dict]:
@@ -156,15 +157,18 @@ def demo_claims(prefix: str) -> list[dict]:
     claims = []
     for i, (reason, ctype) in enumerate(reasons):
         p = _DEMO_PRODUCTS[(i + 1) % len(_DEMO_PRODUCTS)]
+        cid = f"CLM-{prefix}{4400 + i}"
+        item_id = f"CI-{prefix}{4400 + i}"
         claims.append({
-            "claim_id": f"CLM-{prefix}{4400 + i}",
+            "claim_id": cid,
             "order_id": f"{prefix}{70200 + i * 7}",
             "product": p["title"],
             "sku": p["sku"],
             "reason": reason,
             "type": ctype,
             "date": _demo_date(i + 1),
-            "status": "WaitingInAction" if i < 3 else ("Accepted" if i == 3 else "Rejected"),
+            "status": "WaitingInAction" if i < 3 else ("Created" if i == 3 else "Accepted"),
+            "claim_item_ids": [item_id],
         })
     return claims
 

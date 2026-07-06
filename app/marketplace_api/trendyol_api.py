@@ -27,6 +27,7 @@ from typing import Any, Optional
 import httpx
 
 from . import base as B
+from ..trendyol_client import normalize_trendyol_env
 
 PROD_BASE = "https://apigw.trendyol.com/integration"
 STAGE_BASE = "https://stageapigw.trendyol.com/integration"
@@ -47,7 +48,7 @@ class TrendyolAPI(B.MarketplaceClient):
         self.seller_id = str(self.creds.get("seller_id", "") or "")
         self.api_key = str(self.creds.get("api_key", "") or "")
         self.api_secret = str(self.creds.get("api_secret", "") or "")
-        env = str(self.creds.get("env") or "prod")
+        env = normalize_trendyol_env(self.creds.get("env"))
         self.base = STAGE_BASE if env == "stage" else PROD_BASE
 
     @property
@@ -63,6 +64,7 @@ class TrendyolAPI(B.MarketplaceClient):
             "User-Agent": f"{self.seller_id} - SelfIntegration",
             "x-agentname": f"{self.seller_id} - SelfIntegration",
             "x-correlationid": str(uuid.uuid4()),
+            "storeFrontCode": "TR",
             "Content-Type": "application/json",
         }
 
@@ -164,20 +166,48 @@ class TrendyolAPI(B.MarketplaceClient):
 
     # ---- İadeler / tazmin ----
 
-    def _fetch_claims(self, days: int = 30) -> list[dict]:
+    def _fetch_claims(self, days: int = 90) -> list[dict]:
         """getClaims ham içeriğini döner (claim onay/red için claimItems id'leri gerekir)."""
         end = int(time.time() * 1000)
         data = self._req("GET", f"/order/sellers/{self.seller_id}/claims",
                          params={"startDate": end - days * 86400_000, "endDate": end, "size": 200})
         return data.get("content", [])
 
-    def _claim_item_ids(self, claim_id: str) -> list[str]:
-        """Bir iadenin onay/red için gereken claimItems[].id listesini bulur."""
+    @staticmethod
+    def _aggregate_claim_status(statuses: list[str]) -> str:
+        """Çok kalemli iadelerde panelde işlem yapılabilir statüyü öne çıkarır."""
+        for preferred in ("WaitingInAction", "Created", "Unresolved", "Accepted", "Rejected", "Cancelled"):
+            if preferred in statuses:
+                return preferred
+        return statuses[0] if statuses else ""
+
+    def _claim_items_for(self, claim_id: str) -> list[tuple[str, str]]:
+        """(claim_item_id, status) listesi."""
         for cl in self._fetch_claims():
             if str(cl.get("id") or cl.get("claimId")) == str(claim_id):
-                return [str(ci.get("id")) for it in cl.get("items", [])
-                        for ci in (it.get("claimItems") or []) if ci.get("id")]
+                return [
+                    (str(ci.get("id")), (ci.get("claimItemStatus") or {}).get("name", ""))
+                    for it in cl.get("items", [])
+                    for ci in (it.get("claimItems") or []) if ci.get("id")
+                ]
         return []
+
+    def _claim_item_ids(self, claim_id: str) -> list[str]:
+        return [cid for cid, _ in self._claim_items_for(claim_id)]
+
+    def _issue_reason_without_file(self) -> int:
+        """Dosya zorunlu olmayan itiraz sebebi (Trendyol resmi listesi)."""
+        preferred = {451, 1651, 3000, 2101}
+        try:
+            reasons = self._req("GET", "/order/claim-issue-reasons")
+            items = reasons if isinstance(reasons, list) else (reasons.get("claimIssueReasons") or [])
+            for r in items:
+                rid = r.get("id")
+                if rid in preferred:
+                    return int(rid)
+        except B.MarketplaceError:
+            pass
+        return 451
 
     def list_claims(self) -> list[dict]:
         if not self.configured:
@@ -186,14 +216,15 @@ class TrendyolAPI(B.MarketplaceClient):
         for cl in self._fetch_claims():
             items = cl.get("items", [])
             first_line = (items[0] if items else {}).get("orderLine", {})
-            first_ci = ((items[0] if items else {}).get("claimItems") or [{}])[0]
-            # Sebep: customerClaimItemReason.name (yoksa trendyolClaimItemReason.name)
+            all_ci = [
+                ci for it in items for ci in (it.get("claimItems") or []) if ci.get("id")
+            ]
+            first_ci = all_ci[0] if all_ci else {}
             reason = ((first_ci.get("customerClaimItemReason") or {}).get("name")
                       or (first_ci.get("trendyolClaimItemReason") or {}).get("name") or "")
-            # Statü: claimItems[].claimItemStatus.name (Created/WaitingInAction/Accepted/Rejected...)
-            status = (first_ci.get("claimItemStatus") or {}).get("name", "")
-            claim_item_ids = [str(ci.get("id")) for it in items
-                              for ci in (it.get("claimItems") or []) if ci.get("id")]
+            statuses = [(ci.get("claimItemStatus") or {}).get("name", "") for ci in all_ci]
+            status = self._aggregate_claim_status(statuses)
+            claim_item_ids = [str(ci.get("id")) for ci in all_ci]
             rows.append({
                 "claim_id": str(cl.get("id") or cl.get("claimId") or ""),
                 "order_id": str(cl.get("orderNumber", "")),
@@ -207,26 +238,44 @@ class TrendyolAPI(B.MarketplaceClient):
             })
         return self._tag(rows)
 
-    def review_claim(self, claim_id: str, approve: bool, reason: str = "") -> dict:
+    def review_claim(self, claim_id: str, approve: bool, reason: str = "",
+                     claim_item_ids: Optional[list[str]] = None) -> dict:
         if not self.configured:
             return {"ok": True, "mode": "demo",
                     "message": f"İade {'onaylandı' if approve else 'reddedildi'} (DEMO)."}
-        item_ids = self._claim_item_ids(claim_id)
+        items = self._claim_items_for(claim_id)
+        by_id = {cid: st for cid, st in items}
+        if claim_item_ids:
+            item_ids = [str(i) for i in claim_item_ids if str(i) in by_id]
+        else:
+            item_ids = list(by_id.keys())
         if not item_ids:
-            raise B.MarketplaceError(
-                "İade kalemi bulunamadı; iade son 30 günde açılmış ve WaitingInAction statüsünde olmalı.")
+            raise B.MarketplaceError("İade kaydı bulunamadı veya süresi dolmuş olabilir.")
         if approve:
-            # approveClaimLineItems: claimLineItemIdList zorunludur
+            actionable = [i for i in item_ids if by_id.get(i) in ("WaitingInAction", "Created")]
+            if not actionable:
+                raise B.MarketplaceError("Bu iade artık onaylanamaz — yalnızca bekleyen talepler işlenebilir.")
             self._req("PUT", f"/order/sellers/{self.seller_id}/claims/{claim_id}/items/approve",
-                      json={"claimLineItemIdList": item_ids, "params": {}})
-            return {"ok": True, "mode": "live", "message": f"{len(item_ids)} iade kalemi onaylandı."}
-        # createClaimIssue: multipart/form-data — claimIssueReasonId + claimItemIdList + description
-        # claimIssueReasonId=451 => "Diğer" (getClaimIssueReasons resmi listesinden).
-        self._req("POST", f"/order/sellers/{self.seller_id}/claims/{claim_id}/issue",
-                  data={"claimIssueReasonId": 451,
-                        "claimItemIdList": ",".join(item_ids),
-                        "description": (reason or "İtiraz")[:500]})
-        return {"ok": True, "mode": "live", "message": "İade itirazı (red talebi) oluşturuldu."}
+                      json={"claimLineItemIdList": actionable, "params": {}})
+            return {"ok": True, "mode": "live", "message": f"{len(actionable)} iade kalemi onaylandı."}
+        actionable = [i for i in item_ids if by_id.get(i) == "WaitingInAction"]
+        if not actionable:
+            raise B.MarketplaceError(
+                "Bu iade için itiraz oluşturulamaz. Yalnızca depoda işlem bekleyen "
+                "(WaitingInAction) iadeler itiraz edilebilir."
+            )
+        reason_id = self._issue_reason_without_file()
+        # Trendyol createClaimIssue zorunlu olarak multipart/form-data bekler (urlencoded 4xx/502 verebilir)
+        self._req(
+            "POST",
+            f"/order/sellers/{self.seller_id}/claims/{claim_id}/issue",
+            files={
+                "claimIssueReasonId": (None, str(reason_id)),
+                "claimItemIdList": (None, ",".join(actionable)),
+                "description": (None, (reason or "Satıcı itirazı")[:500]),
+            },
+        )
+        return {"ok": True, "mode": "live", "message": "İade itirazı oluşturuldu."}
 
     # ---- Müşteri soruları ----
 

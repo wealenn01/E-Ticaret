@@ -8,6 +8,7 @@ Gerçek mod: Product V2 API (https://developers.trendyol.com)
   - Ürün oluşturma: POST /integration/product/sellers/{sellerId}/v2/products
 """
 import base64
+import os
 import uuid
 from typing import Any, Optional
 
@@ -15,6 +16,15 @@ import httpx
 
 PROD_BASE = "https://apigw.trendyol.com/integration"
 STAGE_BASE = "https://stageapigw.trendyol.com/integration"
+DEFAULT_TRENDYOL_ENV = (os.getenv("TRENDYOL_ENV", "stage") or "stage").strip().lower()
+
+
+def normalize_trendyol_env(env: Optional[str] = None) -> str:
+    """Boş veya test değerleri stage'e; canlı değerleri prod'a yönlendirir."""
+    v = (env or DEFAULT_TRENDYOL_ENV or "stage").strip().lower()
+    if v in ("stage", "test", "staging", "sandbox", "stg"):
+        return "stage"
+    return "prod"
 
 # Demo modu için küçük örnek kategori ağacı (gerçek ağaç ~4000 kategori içerir)
 MOCK_CATEGORIES = [
@@ -75,6 +85,7 @@ class TrendyolClient:
         self.seller_id = seller_id
         self.api_key = api_key
         self.api_secret = api_secret
+        env = normalize_trendyol_env(env)
         self.base = STAGE_BASE if env == "stage" else PROD_BASE
         self.env = env
 
