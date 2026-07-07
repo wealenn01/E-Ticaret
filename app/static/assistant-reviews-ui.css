@@ -114,6 +114,7 @@
 .rev-block h4 { margin: 0 0 8px; font-size: 11px; font-weight: 800; }
 .rev-block-good h4 { color: var(--tl-pos); }
 .rev-block-do h4 { color: var(--tl-violet); }
+.rev-block-avoid h4 { color: var(--tl-rose, #fb7185); }
 
 .rev-evidence {
   background: rgba(38, 34, 58, 0.65);

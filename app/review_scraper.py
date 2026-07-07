@@ -394,7 +394,28 @@ def normalize_product_page_url(url: str, platform: str) -> str:
     if platform == "hepsiburada":
         path = re.sub(r"-yorumlari/?$", "", path, flags=re.I)
         path = re.sub(r"/yorumlar/?$", "", path, flags=re.I)
+    if platform == "trendyol":
+        path = re.sub(r"/yorumlar/?$", "", path, flags=re.I)
     return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+
+def _trendyol_yorumlar_page_url(product_url: str) -> str:
+    return normalize_product_page_url(product_url, "trendyol").rstrip("/") + "/yorumlar"
+
+
+def _merge_raw_reviews(*groups: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for review in group:
+            key = review["comment_text"][:120]
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(review)
+            if len(merged) >= MAX_REVIEWS:
+                return merged
+    return merged
 
 
 def _review_sku_from_html(html: str, url_sku: str) -> str:
@@ -743,19 +764,33 @@ def _access_blocked_message(platform: str) -> str:
     )
 
 
+_curl_session = None
+
+
+def _get_curl_session():
+    global _curl_session
+    if _curl_session is None:
+        try:
+            from curl_cffi import requests as curl_requests
+        except ImportError as exc:
+            raise ValueError(
+                "Trendyol/N11 yorum çekmek için curl_cffi paketi gerekli. "
+                "Sunucuda: pip install -r requirements.txt"
+            ) from exc
+        _curl_session = curl_requests.Session(impersonate=_CURL_IMPERSONATE)
+    return _curl_session
+
+
 def _curl_get_sync(
     url: str,
     *,
     headers: dict[str, str],
     params: dict | None = None,
 ) -> tuple[int, str]:
-    from curl_cffi import requests as curl_requests
-
-    response = curl_requests.get(
+    response = _get_curl_session().get(
         url,
         headers=headers,
         params=params,
-        impersonate=_CURL_IMPERSONATE,
         timeout=FETCH_TIMEOUT,
     )
     return response.status_code, response.text
@@ -909,8 +944,97 @@ def _parse_trendyol_review_item(item: dict) -> dict | None:
     }
 
 
+def _extract_trendyol_review_detail_props(html: str) -> tuple[list[dict], int, str]:
+    """Trendyol /yorumlar sayfasındaki __review-detail__PROPS verisinden yorumları çıkarır."""
+    marker = 'window["__review-detail__PROPS"]='
+    idx = html.find(marker)
+    if idx < 0:
+        return [], 0, ""
+    try:
+        data, _ = json.JSONDecoder().raw_decode(html[idx + len(marker):])
+    except json.JSONDecodeError:
+        return [], 0, ""
+
+    block = data.get("reviewImages") or {}
+    total = int(block.get("totalElements") or 0)
+    product = data.get("product") or {}
+    product_name = str(product.get("name") or "").strip()
+    collected: list[dict] = []
+    for item in block.get("content") or []:
+        parsed = _parse_trendyol_review_item(item)
+        if parsed:
+            collected.append(parsed)
+    return collected, total, product_name
+
+
+def _extract_trendyol_inline_reviews(html: str) -> list[dict]:
+    """Yedek: HTML içindeki rate/comment JSON çiftlerini toplar."""
+    found: list[dict] = []
+    seen: set[str] = set()
+    for rate, comment in re.findall(
+        r'"rate"\s*:\s*(\d+(?:\.\d+)?)\s*,\s*"comment"\s*:\s*"((?:\\.|[^"\\])*)"',
+        html,
+    ):
+        try:
+            text = json.loads(f'"{comment}"')
+        except json.JSONDecodeError:
+            text = comment
+        text = str(text).strip()
+        if len(text) < 3 or text in seen:
+            continue
+        try:
+            stars = int(round(float(rate)))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= stars <= 5:
+            continue
+        seen.add(text)
+        found.append(
+            {
+                "rating": stars,
+                "comment_text": text[:4000],
+                "review_date": date.today(),
+            }
+        )
+    return found
+
+
+async def _fetch_trendyol_reviews_from_html(product_url: str) -> tuple[list[dict], dict]:
+    """Trendyol ürün + yorumlar sayfasından yorum toplar (API engellendiğinde)."""
+    product_url = normalize_product_page_url(product_url, "trendyol")
+    yorumlar_url = _trendyol_yorumlar_page_url(product_url)
+
+    product_html = await fetch_review_page_html(product_url, "trendyol")
+    product_name = _product_name_from_html(product_html, product_url) or _product_name_from_trendyol_url(product_url)
+    image_url = _product_image_from_html(product_html)
+
+    reviews = _merge_raw_reviews(
+        _extract_ldjson_reviews(product_html),
+        _extract_from_embedded_json(product_html),
+        _extract_from_html_patterns(product_html),
+    )
+
+    total_available = 0
+    yorumlar_html = await fetch_review_page_html(yorumlar_url, "trendyol")
+    yorumlar_reviews, total_available, props_name = _extract_trendyol_review_detail_props(yorumlar_html)
+    if props_name:
+        product_name = props_name
+    if len(yorumlar_reviews) < 3:
+        yorumlar_reviews = _extract_trendyol_inline_reviews(yorumlar_html)
+    reviews = _merge_raw_reviews(reviews, yorumlar_reviews)
+
+    return reviews, {
+        "product_name": product_name,
+        "image_url": image_url,
+        "total_available": total_available or len(reviews),
+        "source_url": product_url,
+    }
+
+
 async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[list[dict], dict]:
     """Fetch reviews from Trendyol's public discovery review API."""
+    product_url = normalize_product_page_url(source_url, "trendyol")
+    await _curl_get(product_url, headers=_browser_headers("trendyol", referer=product_url))
     collected: list[dict] = []
     total_available = 0
     page = 1
@@ -1125,27 +1249,28 @@ async def scrape_reviews_from_url(url: str) -> tuple[list[dict], dict]:
                 logger.warning("Trendyol API request failed for %s: %s", content_id, exc)
 
             try:
-                html = await fetch_review_page_html(page_url, platform)
-                product_name = _product_name_from_html(html, page_url) or _product_name_from_trendyol_url(url)
-                image_url = _product_image_from_html(html)
-                raw_reviews = _extract_ldjson_reviews(html)
-                if len(raw_reviews) < 3:
-                    raw_reviews.extend(_extract_from_embedded_json(html))
-                if len(raw_reviews) < 3:
-                    raw_reviews.extend(_extract_from_html_patterns(html))
+                raw_reviews, html_meta = await _fetch_trendyol_reviews_from_html(page_url)
+                product_name = str(html_meta.get("product_name") or _product_name_from_trendyol_url(url))
                 rows, meta = _rows_from_raw_reviews(
                     raw_reviews,
                     product_name=product_name,
                     sku=sku,
                     platform=platform,
-                    source_url=page_url,
+                    source_url=html_meta.get("source_url") or page_url,
+                    total_available=int(html_meta.get("total_available") or len(raw_reviews)),
                 )
-                meta["image_url"] = image_url
-                meta["source_url"] = page_url
+                meta["image_url"] = html_meta.get("image_url")
+                meta["source_url"] = html_meta.get("source_url") or page_url
                 meta["content_id"] = content_id
-                if len(raw_reviews) < 50:
+                total = int(html_meta.get("total_available") or 0)
+                if total > len(raw_reviews):
                     meta["note"] = (
-                        f"Sayfadan {len(raw_reviews)} yorum alındı (SEO önizlemesi). "
+                        f"Trendyol API geçici kapalı; sayfadan {len(raw_reviews)} yorum alındı "
+                        f"(toplam {total}). Daha fazlası için CSV yükleyebilirsiniz."
+                    )
+                elif len(raw_reviews) < 50:
+                    meta["note"] = (
+                        f"Sayfadan {len(raw_reviews)} yorum alındı. "
                         "Daha fazlası için CSV yükleyebilirsiniz."
                     )
                 return rows, meta

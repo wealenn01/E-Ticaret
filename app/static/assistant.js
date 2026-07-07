@@ -289,6 +289,10 @@
               <h4>Yapmanız gerekenler</h4>
               ${renderEvidenceItems(insight.recommendations, "do")}
             </section>
+            <section class="rev-block rev-block-avoid">
+              <h4>Yapmamanız gerekenler</h4>
+              ${renderEvidenceItems(insight.avoidActions, "avoid")}
+            </section>
             <p class="rev-footer-tip">Her müşteriye aynı kopyala-yapıştır cevap vermeyin</p>
           </div>
           <div class="rev-stage">

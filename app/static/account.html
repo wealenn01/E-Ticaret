@@ -72,25 +72,111 @@
   /* mevcut plan */
   .planbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .planname { font-size: 21px; font-weight: 800; }
-  .pill { border-radius: 999px; padding: 4px 13px; font-size: 12px; font-weight: 700; background: var(--lilac-soft); color: var(--lilac); }
-  .pill.warn { background: var(--peach-soft); color: #c07a33; }
+  .pill {
+    border-radius: 999px; padding: 5px 14px; font-size: 12.5px; font-weight: 800; letter-spacing: .02em;
+    color: #f5c98a;
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.06) 0%, transparent 42%),
+      linear-gradient(180deg, #2a2838 0%, #14121c 38%, #0a090f 100%);
+    border: 1px solid rgba(255, 200, 120, 0.35);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 -2px 6px rgba(0, 0, 0, 0.55),
+      0 0 14px rgba(245, 158, 90, 0.18);
+    text-shadow: 0 0 10px rgba(245, 201, 138, 0.35);
+  }
+  .pill.warn {
+    color: #ffb4b4;
+    border-color: rgba(255, 120, 120, 0.4);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 -2px 6px rgba(0, 0, 0, 0.55),
+      0 0 12px rgba(255, 100, 100, 0.2);
+    text-shadow: 0 0 8px rgba(255, 180, 180, 0.3);
+  }
   .usage { margin-top: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-  .u { background: var(--card2); border: 1px solid var(--border); border-radius: 13px; padding: 12px 14px; }
-  .u .lbl { font-size: 12px; font-weight: 700; color: var(--muted); }
-  .u .val { font-size: 15px; font-weight: 800; margin: 2px 0 7px; }
-  .bar { height: 7px; border-radius: 99px; background: var(--lilac-soft); overflow: hidden; }
-  .bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--lilac), var(--peach)); }
+  .u {
+    position: relative; overflow: hidden;
+    border-radius: 13px; padding: 12px 14px 13px;
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.05) 0%, transparent 40%),
+      linear-gradient(180deg, #2a2838 0%, #16141f 42%, #0a090f 100%);
+    border: 1px solid rgba(18, 14, 28, 0.95);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 -3px 8px rgba(0, 0, 0, 0.5),
+      0 8px 20px rgba(0, 0, 0, 0.22);
+  }
+  .u::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, #a78bfa, #5eead4);
+    opacity: .85;
+  }
+  .u .lbl { font-size: 12px; font-weight: 800; color: #b8b0d4; letter-spacing: .02em; }
+  .u .val { font-size: 16px; font-weight: 800; margin: 4px 0 9px; color: #f2efff; text-shadow: 0 0 10px rgba(167, 139, 250, 0.15); }
+  .bar {
+    height: 8px; border-radius: 99px; overflow: hidden;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55);
+  }
+  .bar i {
+    display: block; height: 100%; border-radius: 99px;
+    background: linear-gradient(90deg, #a78bfa, #f5c98a, #5eead4);
+    box-shadow: 0 0 10px rgba(167, 139, 250, 0.45);
+  }
   /* plan grid */
   .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
-  .plan { border: 1.5px solid var(--border); border-radius: 15px; padding: 20px 17px; display: flex; flex-direction: column; background: var(--card); position: relative; }
+  .plan {
+    border: 1.5px solid var(--border); border-radius: 15px; padding: 20px 17px; display: flex; flex-direction: column;
+    background: var(--card); position: relative; overflow: visible;
+    transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+  }
+  .plan:hover {
+    transform: translateY(-3px) scale(1.012);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.26);
+    border-color: rgba(167, 139, 250, 0.6);
+  }
+  .plan::after {
+    content: "";
+    position: absolute; left: 12%; right: 12%; top: 0; height: 16px; pointer-events: none;
+    background: radial-gradient(ellipse at top, rgba(167, 139, 250, 0.34), rgba(45, 212, 191, 0.1) 58%, transparent 78%);
+    filter: blur(4px);
+  }
+  .plan::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, var(--lilac), var(--tl-teal, #2dd4bf));
+    opacity: .92;
+  }
   .plan.hot { border-color: var(--lilac); }
-  .plan.hot::before { content: "En popüler"; position: absolute; top: -11px; left: 14px; background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; font-size: 10.5px; font-weight: 700; padding: 3px 12px; border-radius: 999px; }
+  .plan.hot::before { content: "En popüler"; position: absolute; top: -12px; left: 14px; background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff; font-size: 10.5px; font-weight: 700; padding: 3px 12px; border-radius: 999px; height: auto; right: auto; z-index: 5; opacity: 1; }
   .plan h3 { font-size: 14.5px; }
   .plan .price { font-size: 25px; font-weight: 800; margin: 6px 0 0; }
   .plan .per { font-size: 11.5px; color: var(--muted); margin-bottom: 12px; }
   .plan ul { list-style: none; flex: 1; margin-bottom: 14px; }
-  .plan li { font-size: 12.3px; color: var(--muted); padding: 3.5px 0; display: flex; gap: 6px; }
-  .plan li::before { content: "✓"; color: var(--lilac); font-weight: 800; }
+  .plan li {
+    font-size: 12.8px; color: #d8d2f3; padding: 3.5px 0; display: flex; gap: 6px;
+    text-shadow: 0 0 8px rgba(167, 139, 250, 0.1);
+  }
+  .plan li::before {
+    content: "✓"; color: #b9a8ff; font-weight: 900;
+    text-shadow: 0 0 10px rgba(167, 139, 250, 0.45);
+  }
+  .plan .num-em {
+    font-weight: 900;
+    color: #ff8a3d;
+    text-shadow: 0 0 8px rgba(255, 109, 58, 0.28);
+  }
+  .plan-actions { display: flex; gap: 8px; align-items: center; }
+  .plan-actions .btn { flex: 1; }
+  .detail-btn {
+    border: 1.5px solid var(--border); background: var(--card2); color: var(--ink);
+    width: 38px; height: 38px; border-radius: 11px; cursor: pointer; font-size: 16px; font-weight: 700;
+    transition: transform .2s, border-color .2s, background .2s;
+  }
+  .detail-btn:hover { transform: translateY(-1px); border-color: var(--lilac); background: var(--lilac-soft); }
   /* bağlantılar */
   .conn { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; flex-wrap: wrap; }
   .conn .logo { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; color: #fff; }
@@ -115,6 +201,72 @@
   #toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 10px; z-index: 200; }
   .toast { background: #2b2640; color: #fff; border-radius: 12px; padding: 12px 18px; font-size: 13.5px; box-shadow: 0 10px 30px rgba(43,38,64,.35); max-width: 340px; }
   .toast.ok { background: #226649; }
+
+  /* Paket detaylı inceleme */
+  .plan-detail-backdrop { position: fixed; inset: 0; z-index: 130; background: rgba(7, 6, 14, 0.72); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity .26s ease; }
+  .plan-detail-backdrop.on { opacity: 1; pointer-events: auto; }
+  .plan-ghost { position: fixed; z-index: 131; margin: 0; pointer-events: none;
+    transition: top .32s cubic-bezier(.2,.7,.2,1), left .32s cubic-bezier(.2,.7,.2,1), width .32s cubic-bezier(.2,.7,.2,1), height .32s cubic-bezier(.2,.7,.2,1), border-radius .32s cubic-bezier(.2,.7,.2,1), opacity .2s linear; }
+  .plan-detail-modal {
+    position: fixed; z-index: 132; left: 50%; top: 52%; transform: translate(-50%, -50%);
+    width: min(1100px, 90vw); height: min(820px, 88vh);
+    background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(20, 16, 40, 0.45);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .plan-detail-modal.on { opacity: 1; pointer-events: auto; }
+  .plan-detail-head {
+    position: relative; padding: 18px 22px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    background: var(--card2);
+  }
+  .plan-detail-head::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, var(--lilac), var(--peach), var(--tl-teal, #2dd4bf));
+  }
+  .plan-detail-head::after {
+    content: ""; position: absolute; left: 14%; right: 14%; top: 0; height: 18px;
+    background: radial-gradient(ellipse at top, rgba(255, 179, 77, 0.36), rgba(110, 231, 214, 0.14) 58%, transparent 80%);
+    filter: blur(5px);
+    pointer-events: none;
+  }
+  .plan-detail-title { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
+  .plan-detail-sub { font-size: 14px; color: var(--muted); margin-top: 2px; }
+  .plan-detail-close { border: 1px solid var(--border); background: var(--card); color: var(--ink); border-radius: 12px; padding: 10px 14px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .plan-detail-body { padding: 18px 22px 24px; overflow: auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+  .pd-card {
+    background: linear-gradient(180deg, var(--card2), rgba(14, 12, 24, 0.96));
+    border: 1px solid rgba(20, 16, 34, 0.95);
+    border-radius: 14px; padding: 16px 16px;
+    position: relative; overflow: hidden;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+      inset 0 0 0 2px rgba(0, 0, 0, 0.42),
+      0 12px 28px rgba(0, 0, 0, 0.28);
+  }
+  .pd-card::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, #ff9d57, #a78bfa, #5eead4);
+    opacity: .95;
+  }
+  .pd-card::after {
+    content: "";
+    position: absolute; left: 10%; right: 10%; top: 0; height: 16px;
+    background: radial-gradient(ellipse at top, rgba(255, 157, 87, 0.3), rgba(167, 139, 250, 0.12) 58%, transparent 80%);
+    filter: blur(4px);
+    pointer-events: none;
+  }
+  .pd-card h4 { font-size: 16px; margin-bottom: 10px; }
+  .pd-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .pd-list li { font-size: 14px; color: var(--ink); display: flex; gap: 8px; line-height: 1.45; }
+  .pd-list li::before { content: "•"; color: var(--lilac); font-weight: 900; }
+  .pd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pd-mini { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 11px; }
+  .pd-mini b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .pd-mini span { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+  @media (max-width: 900px) { .plan-detail-body { grid-template-columns: 1fr; } .plan-detail-title { font-size: 22px; } }
 </style>
 </head>
 <body>
@@ -211,6 +363,17 @@
 <div id="toasts"></div>
 
 <div class="overlay" id="delOverlay"><div class="modal" id="delModal"></div></div>
+<div id="planDetailBackdrop" class="plan-detail-backdrop"></div>
+<div id="planDetailModal" class="plan-detail-modal">
+  <div class="plan-detail-head">
+    <div>
+      <div class="plan-detail-title" id="pdTitle">Paket Detayı</div>
+      <div class="plan-detail-sub" id="pdSub"></div>
+    </div>
+    <button class="plan-detail-close" type="button" onclick="closePlanDetail()">Kapat ✕</button>
+  </div>
+  <div class="plan-detail-body" id="pdBody"></div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -240,6 +403,96 @@ const METRICS = {
 const PLATFORM_COLORS = { trendyol: '#f27a1a', hepsiburada: '#ff6000', n11: '#5d3ebc', amazon: '#232f3e' };
 
 let me = null, plansData = null, platforms = [], editingConnId = null, checkoutPlan = null;
+let planGhost = null, planFromEl = null, planCloseTimer = null;
+
+const PLAN_AI_DETAILS = {
+  free: {
+    aiSummary: 'Temel AI başlangıç paketi. Ürün keşfi ve yorum okuma akışlarını hızlıca test etmek için.',
+    aiServices: [
+      'Listing Copilot: başlık + açıklama önerileri üretir (Aylık 3 ilan)',
+      'Review Reader: yorumlardan temel duygu ve konu çıkarımı yapar',
+      'Soru Cevap Asistanı: kısa ve güvenli yanıt önerir (Aylık 5 cevap)',
+      'Store Baseline Analizi: tek pazaryerinde temel performans özeti verir',
+    ],
+    models: [
+      ['Yorum Analiz Motoru', 'Temel duygu skoru + şikayet etiketi'],
+      ['İlan Metin Motoru', 'Kısa listing varyantları'],
+      ['Cevap Öneri Motoru', 'Müşteri sorularına hızlı yanıt taslağı'],
+      ['KPI Özetleyici', 'Sipariş/ürün/stok metrik özeti'],
+    ],
+    scenarios: [
+      'Yeni başlayan satıcı için AI test ortamı',
+      'Tek mağaza operasyonunu düzenli takip',
+      'İlk ürünlerde yorum analizi ile risk tespiti',
+    ],
+  },
+  starter: {
+    aiSummary: 'Günlük operasyon için optimize paket. Yorum + ilan + soru trafiğini tek panelden yönetir.',
+    aiServices: [
+      'Listing Copilot Pro: ürün başına çoklu metin varyantı (Aylık 30 ilan)',
+      'Review Intelligence: daha derin konu kırılımı + trend takibi (Aylık 500 yorum)',
+      'Q&A Assistant: otomatik öneri + ton uyumu (Aylık 100 cevap)',
+      'Insight Pack: iade/kargo/soru için aksiyon önerileri',
+    ],
+    models: [
+      ['Yorum Kök Neden Analizi', 'Kargo, kalite, beden vb. ayrıştırma'],
+      ['İçgörü Üretici', 'Haftalık aksiyon önerileri ve özet'],
+      ['Ürün İlan Asistanı', 'Dönüşüm odaklı metin önerileri'],
+      ['Soru Niyet Sınıflandırma', 'Soruları kategoriye ayırıp cevaplar'],
+    ],
+    scenarios: [
+      'İade oranını düşürmek için konu bazlı aksiyon',
+      'Ürün sayfasını AI ile haftalık iyileştirme',
+      'Soru cevap süresini kısaltıp memnuniyeti artırma',
+    ],
+  },
+  pro: {
+    aiSummary: 'Çok kanallı büyüme paketi. Gelişmiş analiz, buybox takibi ve dinamik fiyat kararları içerir.',
+    aiServices: [
+      'Unlimited Q&A ve Insight: yüksek soru hacminde sınırsız AI destek',
+      'Image + Listing Suite: ilan + satış görseli birlikte üretim (Aylık 200+200)',
+      'Buybox AI + Dynamic Pricing: rekabet ve marja göre öneri',
+      'Profit Intelligence: ciro/kâr trendlerini AI ile yorumlar',
+    ],
+    models: [
+      ['Fiyatlama Karar Motoru', 'Rakip + marj + stok bilgisine göre öneri'],
+      ['Buybox Tahminleyici', 'Buybox kazanım risk/skor analizi'],
+      ['Kârlılık Analizleyici', 'Kategori/ürün bazında gelir-kâr okuması'],
+      ['Görsel Üretim Motoru', 'Satış odaklı görsel ve banner önerisi'],
+    ],
+    scenarios: [
+      'Yoğun rekabette fiyatı manuel takip etmeden optimizasyon',
+      'Çok ürünlü mağazada kârlılık odaklı karar alma',
+      'Pazaryeri bazlı performans farklarını hızlı kapatma',
+    ],
+  },
+  enterprise: {
+    aiSummary: 'Kurumsal ölçekte tam otomasyon. Çok mağaza, yüksek hacim ve ileri düzey karar destek ihtiyaçları için.',
+    aiServices: [
+      'Limitsiz AI ilan/görsel/içgörü/soru-cevap akışı',
+      'Gelişmiş çok pazaryeri orkestrasyonu ve merkezi kontrol',
+      'Tam analitik + buybox + dinamik fiyatlama + özel içgörü raporları',
+      'Öncelikli destek ve süreç iyileştirme danışmanlığı',
+    ],
+    models: [
+      ['Omni-Channel Orchestrator', 'Tüm mağazalarda senkron AI karar akışı'],
+      ['Talep ve Trend Öngörü', 'Dönemsel talep değişimine göre öneri'],
+      ['Risk Erken Uyarı Modeli', 'İade/şikayet dalgalanmasını erken tespit'],
+      ['Kurumsal KPI Copilot', 'Ekip bazlı hedef ve performans takibi'],
+    ],
+    scenarios: [
+      'Birden çok ekip ve mağazayı tek panelden yönetme',
+      'Hızlı karar için otomatik içgörü ve uyarı sistemi',
+      'Kurumsal raporlama ve stratejik fiyat kararları',
+    ],
+  },
+};
+
+function highlightPlanNumbers(text) {
+  return esc(text).replace(/(^|[^\d])(\d{1,4})(?=[^\d]|$)/g, (m, p1, p2) => {
+    return p1 + '<span class="num-em">' + p2 + '</span>';
+  });
+}
 
 async function load() {
   me = await api('/api/auth/me');
@@ -282,13 +535,88 @@ async function loadPlans() {
       '<h3>' + p.name + '</h3>' +
       '<div class="price">' + (p.price ? '₺' + p.price : 'Ücretsiz') + '</div>' +
       '<div class="per">' + (p.price ? 'aylık' : p.tagline) + '</div>' +
-      '<ul>' + p.bullets.map(b => '<li>' + b + '</li>').join('') + '</ul>' +
+      '<ul>' + p.bullets.map(b => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
+      '<div class="plan-actions">' +
       (cur
         ? '<button class="btn ghost" disabled>Mevcut paketin</button>'
         : '<button class="btn ' + (p.popular ? 'primary' : 'ghost') + '" onclick="openPay(\'' + p.key + '\')">' +
           (p.price ? 'Bu Pakete Geç' : 'Ücretsize Dön') + '</button>') +
+      '<button class="detail-btn" type="button" title="Detaylı incele" aria-label="Detaylı incele" onclick="openPlanDetail(\'' + p.key + '\', this)">⤢</button>' +
+      '</div>' +
       '</div>';
   }).join('');
+}
+
+function renderPlanDetail(planKey) {
+  const p = plansData?.plans?.find(x => x.key === planKey);
+  const d = PLAN_AI_DETAILS[planKey] || PLAN_AI_DETAILS.starter;
+  if (!p) return;
+  $('pdTitle').textContent = p.name + ' Paketi';
+  $('pdSub').textContent = (p.price ? '₺' + p.price + '/ay' : 'Ücretsiz') + ' · ' + (p.tagline || 'AI hizmet detayları');
+  $('pdBody').innerHTML =
+    '<section class="pd-card">' +
+      '<h4>🚀 Bu pakette AI nasıl çalışır?</h4>' +
+      '<p class="muted" style="font-size:14px;line-height:1.6;margin-bottom:10px;color:var(--ink)">' + esc(d.aiSummary) + '</p>' +
+      '<ul class="pd-list">' + d.aiServices.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' +
+      '<h4 style="margin-top:14px">📌 Kullanım senaryoları</h4>' +
+      '<ul class="pd-list">' + d.scenarios.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' +
+    '</section>' +
+    '<section class="pd-card">' +
+      '<h4>🧠 Yapay zeka yetenekleri</h4>' +
+      '<div class="pd-grid">' + d.models.map(m => '<div class="pd-mini"><b>' + esc(m[0]) + '</b><span>' + esc(m[1]) + '</span></div>').join('') + '</div>' +
+      '<h4 style="margin-top:14px">✅ Pakete dahil başlıklar</h4>' +
+      '<ul class="pd-list">' + p.bullets.map(i => '<li>' + esc(i) + '</li>').join('') + '</ul>' +
+    '</section>';
+}
+
+function closePlanDetail() {
+  const backdrop = $('planDetailBackdrop');
+  const modal = $('planDetailModal');
+  if (planCloseTimer) { clearTimeout(planCloseTimer); planCloseTimer = null; }
+  backdrop.classList.remove('on');
+  modal.classList.remove('on');
+  if (planGhost) planGhost.style.opacity = '0';
+  planCloseTimer = setTimeout(() => {
+    if (planGhost) planGhost.remove();
+    planGhost = null;
+    if (planFromEl) planFromEl.style.visibility = '';
+    planFromEl = null;
+    planCloseTimer = null;
+  }, 220);
+}
+
+function openPlanDetail(planKey, triggerBtn) {
+  const card = triggerBtn?.closest('.plan');
+  if (!card) return;
+  const backdrop = $('planDetailBackdrop');
+  const modal = $('planDetailModal');
+  if (planCloseTimer) { clearTimeout(planCloseTimer); planCloseTimer = null; }
+  if (planGhost) { planGhost.remove(); planGhost = null; }
+  if (planFromEl) planFromEl.style.visibility = '';
+
+  renderPlanDetail(planKey);
+  planFromEl = card;
+  const from = card.getBoundingClientRect();
+  planGhost = card.cloneNode(true);
+  planGhost.classList.add('plan-ghost');
+  planGhost.style.top = from.top + 'px';
+  planGhost.style.left = from.left + 'px';
+  planGhost.style.width = from.width + 'px';
+  planGhost.style.height = from.height + 'px';
+  planGhost.style.borderRadius = getComputedStyle(card).borderRadius;
+  document.body.appendChild(planGhost);
+  card.style.visibility = 'hidden';
+
+  requestAnimationFrame(() => {
+    const to = modal.getBoundingClientRect();
+    backdrop.classList.add('on');
+    modal.classList.add('on');
+    planGhost.style.top = to.top + 'px';
+    planGhost.style.left = to.left + 'px';
+    planGhost.style.width = to.width + 'px';
+    planGhost.style.height = to.height + 'px';
+    planGhost.style.borderRadius = '20px';
+  });
 }
 
 function openPay(planKey) {
@@ -441,6 +769,8 @@ async function loadInvoices() {
 }
 
 load().catch(e => toast(e.message));
+$('planDetailBackdrop').addEventListener('click', closePlanDetail);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePlanDetail(); });
 
 function openDeleteStep1() {
   $('delModal').innerHTML = '<h2>Hesabı silmek istiyor musun?</h2><p class="muted">Bu işlem geri alınamaz. E-posta adresin tekrar kayıt için kullanılabilir olur.</p><div style="display:flex;gap:10px;margin-top:18px"><button class="btn danger" style="flex:1" onclick="openDeleteStep2()">Evet, devam et</button><button class="btn ghost" onclick="closeDelete()">Vazgeç</button></div>';

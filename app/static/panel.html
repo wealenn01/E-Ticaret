@@ -426,6 +426,7 @@
     display: flex; flex-direction: column; gap: 8px; min-height: 188px;
     position: relative; overflow: hidden;
   }
+  .ov-kpi-card > * { position: relative; z-index: 2; }
   html[data-theme="dark"] .ov-kpi-card {
     background: linear-gradient(165deg, rgba(24, 20, 40, 0.96), rgba(20, 24, 42, 0.92));
     border-color: rgba(120, 100, 210, 0.18);
@@ -433,14 +434,31 @@
   .ov-kpi-card::before {
     content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: linear-gradient(90deg, var(--tl-violet, var(--lilac)), var(--tl-teal, #2dd4bf));
-    opacity: .85;
+    opacity: .95; z-index: 3;
+  }
+  .ov-kpi-card::after {
+    content: "";
+    position: absolute; left: 8%; right: 8%; top: 0; height: 28px;
+    background: radial-gradient(ellipse at top, rgba(167, 139, 250, 0.46), rgba(45, 212, 191, 0.15) 58%, transparent 78%);
+    filter: blur(5px);
+    pointer-events: none;
+    z-index: 1;
   }
   .ov-kpi-card.tone-teal::before { background: linear-gradient(90deg, var(--tl-teal, #6ee7d6), var(--tl-sky, #8ec5ff)); }
   .ov-kpi-card.tone-amber::before { background: linear-gradient(90deg, var(--tl-amber, #f0c27a), var(--tl-rose, #f0a8b8)); }
   .ov-kpi-card.tone-rose::before { background: linear-gradient(90deg, var(--tl-rose, #f0a8b8), var(--tl-violet, #a78bfa)); }
+  .ov-kpi-card.tone-teal::after {
+    background: radial-gradient(ellipse at top, rgba(110, 231, 214, 0.46), rgba(142, 197, 255, 0.13) 58%, transparent 75%);
+  }
+  .ov-kpi-card.tone-amber::after {
+    background: radial-gradient(ellipse at top, rgba(240, 194, 122, 0.46), rgba(240, 168, 184, 0.13) 58%, transparent 75%);
+  }
+  .ov-kpi-card.tone-rose::after {
+    background: radial-gradient(ellipse at top, rgba(240, 168, 184, 0.46), rgba(167, 139, 250, 0.13) 58%, transparent 75%);
+  }
   .ov-kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .ov-kpi-actions { margin-left: auto; display: inline-flex; gap: 6px; flex-shrink: 0; }
   .ov-kpi-go {
-    margin-left: auto; flex-shrink: 0;
     padding: 4px 10px; font-size: 10px; font-weight: 800; letter-spacing: .04em;
     border-radius: 8px; border: 1px solid rgba(139, 124, 246, 0.35);
     background: rgba(139, 124, 246, 0.1); color: var(--tl-violet, var(--lilac));
@@ -452,6 +470,95 @@
     background: rgba(110, 231, 214, 0.14); border-color: rgba(110, 231, 214, 0.45);
     color: var(--tl-teal, #6ee7d6); transform: none;
   }
+  .ov-kpi-detail {
+    width: 28px; height: 28px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800;
+    border-radius: 999px; border: 1px solid rgba(130, 115, 200, 0.35);
+    background: rgba(130, 115, 200, 0.09); color: var(--muted);
+    cursor: pointer; font-family: inherit; line-height: 1.2;
+    transition: background .15s, border-color .15s, color .15s, transform .15s;
+  }
+  .ov-kpi-detail:hover {
+    background: rgba(240, 194, 122, 0.12); border-color: rgba(240, 194, 122, 0.5);
+    color: var(--tl-amber, #f0c27a);
+    transform: translateY(-1px);
+  }
+  .ov-detail-backdrop {
+    position: fixed; inset: 0; z-index: 1200;
+    background: rgba(6, 5, 13, 0.68);
+    backdrop-filter: blur(2px);
+    opacity: 0; pointer-events: none;
+    transition: opacity .26s ease;
+  }
+  .ov-detail-backdrop.show { opacity: 1; pointer-events: auto; }
+  .ov-detail-ghost {
+    position: fixed; z-index: 1201; margin: 0;
+    transition: top .32s cubic-bezier(.2,.7,.2,1), left .32s cubic-bezier(.2,.7,.2,1),
+      width .32s cubic-bezier(.2,.7,.2,1), height .32s cubic-bezier(.2,.7,.2,1),
+      border-radius .32s cubic-bezier(.2,.7,.2,1), opacity .2s linear;
+    pointer-events: none;
+  }
+  .ov-detail-panel {
+    position: fixed; z-index: 1202;
+    width: min(1260px, 88vw); height: min(840px, 88vh);
+    left: 50%; top: 52%; transform: translate(-50%, -50%);
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s ease;
+    display: flex; flex-direction: column;
+    background: linear-gradient(165deg, rgba(24, 20, 40, 0.98), rgba(20, 24, 42, 0.96));
+    border: 1px solid rgba(130, 115, 200, 0.28);
+    border-radius: 18px;
+    box-shadow: 0 22px 66px rgba(0, 0, 0, 0.48);
+    overflow: hidden;
+  }
+  .ov-detail-panel.show { opacity: 1; pointer-events: auto; }
+  .ov-detail-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 14px 16px; border-bottom: 1px solid rgba(130, 115, 200, 0.22);
+    background: rgba(16, 14, 30, 0.68);
+    position: relative; overflow: hidden;
+  }
+  .ov-detail-head::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 2px;
+    background: linear-gradient(90deg, var(--tl-violet, #a78bfa), var(--tl-teal, #6ee7d6));
+    opacity: .95;
+  }
+  .ov-detail-head::after {
+    content: "";
+    position: absolute; left: 12%; right: 12%; top: 0; height: 22px;
+    background: radial-gradient(ellipse at top, rgba(167, 139, 250, 0.42), rgba(110, 231, 214, 0.14) 58%, transparent 78%);
+    filter: blur(4px);
+  }
+  .ov-detail-title { margin: 0; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .ov-detail-close {
+    border: 1px solid rgba(130, 115, 200, 0.3); border-radius: 9px; background: rgba(130, 115, 200, 0.14);
+    color: var(--ink); font-size: 12px; font-weight: 700; padding: 6px 10px; cursor: pointer;
+  }
+  .ov-detail-body { padding: 14px; overflow: auto; }
+  .ov-detail-clone { min-height: calc(100% - 2px); }
+  .ov-detail-panel .ov-detail-title { font-size: 21px; letter-spacing: .04em; color: #e9e5ff; text-transform: none; }
+  .ov-detail-panel .ov-detail-close { font-size: 15px; padding: 9px 14px; border-radius: 11px; }
+  .ov-detail-panel .ov-kpi-card { min-height: 0; padding: 20px 22px 18px; gap: 14px; }
+  .ov-detail-panel .ov-kpi-lbl { font-size: 13px; letter-spacing: .06em; }
+  .ov-detail-panel .ov-kpi-val { font-size: 48px; line-height: 1; letter-spacing: -.8px; }
+  .ov-detail-panel .ov-kpi-sub { font-size: 18px; line-height: 1.6; color: #d8d2f3; }
+  .ov-detail-panel .ov-kpi-list { font-size: 18px; }
+  .ov-detail-panel .ov-kpi-list li { padding: 10px 0; line-height: 1.55; }
+  .ov-detail-panel .ov-kpi-list strong { font-size: 20px; }
+  .ov-detail-panel .ov-reason-row { font-size: 16px; gap: 8px 12px; }
+  .ov-detail-panel .ov-reason-lbl { font-size: 16px; }
+  .ov-detail-panel .ov-reason-track { height: 10px; }
+  .ov-detail-panel .ov-reason-n { font-size: 17px; }
+  .ov-detail-panel .ov-mini-bars { height: 78px; gap: 6px; }
+  .ov-detail-panel h2 { font-size: 34px; line-height: 1.2; margin-bottom: 16px; }
+  .ov-detail-panel .ov-act-row { padding: 16px 0; gap: 8px 16px; }
+  .ov-detail-panel .ov-act-id { font-size: 25px; font-weight: 800; line-height: 1.15; }
+  .ov-detail-panel .ov-act-meta { font-size: 19px; line-height: 1.35; }
+  .ov-detail-panel .ov-act-date { font-size: 18px; line-height: 1.28; }
+  .ov-detail-panel .ov-act-status { font-size: 24px; line-height: 1.12; }
+  .ov-detail-panel .ov-kpi-detail { display: none !important; }
   .ov-kpi-lbl { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .ov-kpi-val { font-size: 26px; font-weight: 800; letter-spacing: -.5px; line-height: 1.1; }
   .ov-kpi-sub { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
@@ -483,12 +590,54 @@
   .ov-reason-track i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--tl-rose, #f0a8b8), var(--tl-amber, #f0c27a)); }
   .ov-reason-n { font-weight: 800; color: var(--tl-amber, #f0c27a); font-size: 10px; }
   .ov-stock-card h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ov-stock-card,
+  .ov-webhook-card,
+  .ov-kpi-card { position: relative; overflow: hidden; }
+  .ov-stock-card::before,
+  .ov-webhook-card::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 3px; opacity: .98;
+  }
+  .ov-stock-card::after,
+  .ov-webhook-card::after {
+    content: "";
+    position: absolute; left: 14%; right: 14%; top: 0; height: 18px;
+    filter: blur(4px); pointer-events: none;
+  }
+  .ov-stock-card::before { background: linear-gradient(90deg, #ff9bd1, #ff7fb2, #f66ea3); }
+  .ov-stock-card::after {
+    background: radial-gradient(ellipse at top, rgba(255, 155, 209, 0.42), rgba(246, 110, 163, 0.16) 58%, transparent 78%);
+  }
+  .ov-webhook-card::before { background: linear-gradient(90deg, #8cf3bf, #44d7a6, #1bc9b6); }
+  .ov-webhook-card::after {
+    background: radial-gradient(ellipse at top, rgba(140, 243, 191, 0.42), rgba(27, 201, 182, 0.16) 58%, transparent 78%);
+  }
+  .ov-kpi-card:not(.tone-teal):not(.tone-amber):not(.tone-rose)::before {
+    background: linear-gradient(90deg, #b197ff, #9f8bff, #7f74ff);
+  }
+  .ov-kpi-card:not(.tone-teal):not(.tone-amber):not(.tone-rose)::after {
+    background: radial-gradient(ellipse at top, rgba(177, 151, 255, 0.44), rgba(127, 116, 255, 0.15) 58%, transparent 78%);
+  }
   .ov-stock-body { display: grid; grid-template-columns: 1fr 120px; gap: 16px; align-items: start; }
   @media (max-width: 800px) { .ov-stock-body { grid-template-columns: 1fr; } .ov-stock-spark { display: none; } }
   .ov-stock-spark .ov-mini-bars { height: 100px; }
   .ov-stock-spark-lbl { font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
   .ov-dash-bottom { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
   @media (max-width: 900px) { .ov-dash-bottom { grid-template-columns: 1fr; } }
+  .ov-activity-card { position: relative; overflow: hidden; }
+  .ov-activity-card::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, #ffb34d, #ff8a3d, #ff6d3a);
+    opacity: .98;
+  }
+  .ov-activity-card::after {
+    content: "";
+    position: absolute; left: 14%; right: 14%; top: 0; height: 18px;
+    background: radial-gradient(ellipse at top, rgba(255, 170, 86, 0.4), rgba(255, 109, 58, 0.16) 58%, transparent 78%);
+    filter: blur(4px);
+    pointer-events: none;
+  }
   .ov-activity-list { display: flex; flex-direction: column; gap: 0; }
   .ov-act-row {
     display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
@@ -502,6 +651,8 @@
   .ov-act-status.ok { color: var(--tl-teal, #6ee7d6); }
   .ov-act-status.warn { color: var(--tl-amber, #f0c27a); }
   .ov-act-status.muted { color: var(--muted); }
+  .ov-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .ov-card-head h2 { margin: 0; }
 
   html[data-theme="dark"] body:has(#viewOverview:not(.hidden)) {
     background:
@@ -1317,7 +1468,7 @@
 
   @media (max-width: 640px) { .row, .row3, .attr { grid-template-columns: 1fr; } .card { padding: 18px; } }
 </style>
-<link rel="stylesheet" href="/static/assistant-reviews-ui.css?v=202607074400">
+<link rel="stylesheet" href="/static/assistant-reviews-ui.css?v=202607074600">
 <link rel="stylesheet" href="/static/assistant-consultant-ui.css?v=202607074400">
 <link rel="stylesheet" href="/static/assistant-ops-ui.css?v=202607074400">
 <link rel="stylesheet" href="/static/assistant-reports.css?v=202607074400">
@@ -1395,7 +1546,10 @@
   <div id="viewOverview" class="ov-dashboard">
     <div class="ov-dash-kpis" id="ovKpis"></div>
     <div class="card ov-stock-card">
-      <h2>⚠️ Düşük stok alarmı <span style="font-weight:400;font-size:12px;color:var(--muted)" id="ovThresholdLbl"></span></h2>
+      <div class="ov-card-head">
+        <h2>⚠️ Düşük stok alarmı <span style="font-weight:400;font-size:12px;color:var(--muted)" id="ovThresholdLbl"></span></h2>
+        <button type="button" class="ov-kpi-detail" id="ovStockDetailBtn" title="Detaylı incele" aria-label="Detaylı incele">⤢</button>
+      </div>
       <div class="filters">
         <label style="font-size:12.5px;color:var(--muted)">Eşik:
           <input type="number" id="ovThreshold" min="0" style="width:70px;margin-left:6px">
@@ -1418,10 +1572,21 @@
         <div id="whList"></div>
       </div>
       <div class="card ov-activity-card">
-        <h2>📋 Son işlemler</h2>
+        <div class="ov-card-head">
+          <h2>📋 Son işlemler</h2>
+          <button type="button" class="ov-kpi-detail" id="ovActivityDetailBtn" title="Detaylı incele" aria-label="Detaylı incele">⤢</button>
+        </div>
         <div class="ov-activity-list" id="ovActivity"></div>
       </div>
     </div>
+  </div>
+  <div id="ovDetailBackdrop" class="ov-detail-backdrop hidden"></div>
+  <div id="ovDetailPanel" class="ov-detail-panel hidden">
+    <div class="ov-detail-head">
+      <h3 class="ov-detail-title" id="ovDetailTitle">Detaylı İnceleme</h3>
+      <button type="button" class="ov-detail-close" id="ovDetailClose">Kapat ✕</button>
+    </div>
+    <div class="ov-detail-body" id="ovDetailBody"></div>
   </div>
 
   <!-- SİPARİŞLER -->
@@ -2048,6 +2213,109 @@ function renderOverviewActivity(rows) {
   }).join('');
 }
 
+const OV_DETAIL_TITLES = {
+  orders: 'Sipariş Detaylı İnceleme',
+  revenue: 'Ciro Detaylı İnceleme',
+  questions: 'Bekleyen Sorular Detaylı İnceleme',
+  claims: 'Açık İadeler Detaylı İnceleme',
+  activity: 'Son İşlemler Detaylı İnceleme',
+  stock: 'Düşük Stok Detaylı İnceleme',
+};
+let ovDetailGhost = null;
+let ovDetailFromEl = null;
+let ovDetailCloseTimer = null;
+
+function closeOverviewDetail() {
+  const backdrop = $('ovDetailBackdrop');
+  const panel = $('ovDetailPanel');
+  if (!backdrop || !panel) return;
+  if (ovDetailCloseTimer) {
+    clearTimeout(ovDetailCloseTimer);
+    ovDetailCloseTimer = null;
+  }
+  backdrop.classList.remove('show');
+  panel.classList.remove('show');
+  if (ovDetailGhost) ovDetailGhost.style.opacity = '0';
+  ovDetailCloseTimer = setTimeout(() => {
+    if (ovDetailGhost) ovDetailGhost.remove();
+    ovDetailGhost = null;
+    if (ovDetailFromEl) ovDetailFromEl.style.visibility = '';
+    ovDetailFromEl = null;
+    backdrop.classList.add('hidden');
+    panel.classList.add('hidden');
+    $('ovDetailBody').innerHTML = '';
+    ovDetailCloseTimer = null;
+  }, 220);
+}
+
+function openOverviewDetail(key, sourceEl) {
+  const backdrop = $('ovDetailBackdrop');
+  const panel = $('ovDetailPanel');
+  const body = $('ovDetailBody');
+  if (!backdrop || !panel || !body || !sourceEl) return;
+  if (ovDetailCloseTimer) {
+    clearTimeout(ovDetailCloseTimer);
+    ovDetailCloseTimer = null;
+  }
+  if (ovDetailGhost) {
+    ovDetailGhost.remove();
+    ovDetailGhost = null;
+  }
+  if (ovDetailFromEl) {
+    ovDetailFromEl.style.visibility = '';
+    ovDetailFromEl = null;
+  }
+  backdrop.classList.remove('show');
+  panel.classList.remove('show');
+  backdrop.classList.add('hidden');
+  panel.classList.add('hidden');
+  ovDetailFromEl = sourceEl;
+  const from = sourceEl.getBoundingClientRect();
+  const cardCopy = sourceEl.cloneNode(true);
+  cardCopy.classList.add('ov-detail-clone');
+  cardCopy.querySelectorAll('.ov-kpi-actions').forEach(n => n.remove());
+  body.innerHTML = '';
+  body.appendChild(cardCopy);
+  $('ovDetailTitle').textContent = OV_DETAIL_TITLES[key] || 'Detaylı İnceleme';
+
+  ovDetailGhost = sourceEl.cloneNode(true);
+  ovDetailGhost.classList.add('ov-detail-ghost');
+  ovDetailGhost.style.top = from.top + 'px';
+  ovDetailGhost.style.left = from.left + 'px';
+  ovDetailGhost.style.width = from.width + 'px';
+  ovDetailGhost.style.height = from.height + 'px';
+  ovDetailGhost.style.borderRadius = getComputedStyle(sourceEl).borderRadius;
+  document.body.appendChild(ovDetailGhost);
+  sourceEl.style.visibility = 'hidden';
+
+  backdrop.classList.remove('hidden');
+  panel.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    const target = panel.getBoundingClientRect();
+    backdrop.classList.add('show');
+    panel.classList.add('show');
+    ovDetailGhost.style.top = target.top + 'px';
+    ovDetailGhost.style.left = target.left + 'px';
+    ovDetailGhost.style.width = target.width + 'px';
+    ovDetailGhost.style.height = target.height + 'px';
+    ovDetailGhost.style.borderRadius = '18px';
+  });
+}
+
+function bindOverviewDetailEvents() {
+  $('ovKpis')?.querySelectorAll('.ov-kpi-detail').forEach(btn => {
+    btn.onclick = () => openOverviewDetail(btn.dataset.detail || '', btn.closest('.ov-kpi-card'));
+  });
+  const activityBtn = $('ovActivityDetailBtn');
+  if (activityBtn) {
+    activityBtn.onclick = () => openOverviewDetail('activity', $('viewOverview')?.querySelector('.ov-activity-card'));
+  }
+  const stockBtn = $('ovStockDetailBtn');
+  if (stockBtn) {
+    stockBtn.onclick = () => openOverviewDetail('stock', $('viewOverview')?.querySelector('.ov-stock-card'));
+  }
+}
+
 async function loadOverview() {
   try {
     const o = await api('/api/mp/overview');
@@ -2066,30 +2334,31 @@ async function loadOverview() {
 
     $('ovKpis').innerHTML =
       '<article class="ov-kpi-card">' +
-        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Sipariş (30 gün)</span><button type="button" class="ov-kpi-go" onclick="switchView(\'orders\')">Git →</button></div>' +
+        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Sipariş (30 gün)</span><span class="ov-kpi-actions"><button type="button" class="ov-kpi-detail" data-detail="orders" title="Detaylı incele" aria-label="Detaylı incele">⤢</button><button type="button" class="ov-kpi-go" onclick="switchView(\'orders\')">Git →</button></span></div>' +
         '<div class="ov-kpi-val">' + (o.orders_total || 0) + '</div>' +
         '<div class="ov-kpi-sub">' + (st.Created || 0) + ' yeni · ' + (st.Shipped || 0) + ' kargoda · ' + (st.Cancelled || 0) + ' iptal</div>' +
         ovMiniBars(o.orders_daily, 'count', 'violet', 14) +
       '</article>' +
       '<article class="ov-kpi-card tone-teal">' +
-        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Ciro (30 gün)</span>' + ovTrendBadge(revPct) + '</div>' +
+        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Ciro (30 gün)</span><span class="ov-kpi-actions"><button type="button" class="ov-kpi-detail" data-detail="revenue" title="Detaylı incele" aria-label="Detaylı incele">⤢</button>' + ovTrendBadge(revPct) + '</span></div>' +
         '<div class="ov-kpi-val">' + fmtTL(o.revenue_30d ?? o.revenue_14d) + '</div>' +
         '<div class="ov-kpi-sub">iptal/iade hariç · son 7 gün vs önceki 7 gün</div>' +
         ovMiniBars(o.revenue_daily, 'revenue', 'teal', 14) +
         topList +
       '</article>' +
       '<article class="ov-kpi-card tone-amber">' +
-        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Bekleyen soru</span></div>' +
+        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Bekleyen soru</span><span class="ov-kpi-actions"><button type="button" class="ov-kpi-detail" data-detail="questions" title="Detaylı incele" aria-label="Detaylı incele">⤢</button></span></div>' +
         '<div class="ov-kpi-val">' + (o.waiting_questions || 0) + '</div>' +
         '<div class="ov-kpi-sub">cevap bekliyor</div>' +
         qList +
       '</article>' +
       '<article class="ov-kpi-card tone-rose">' +
-        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Açık iade</span></div>' +
+        '<div class="ov-kpi-top"><span class="ov-kpi-lbl">Açık iade</span><span class="ov-kpi-actions"><button type="button" class="ov-kpi-detail" data-detail="claims" title="Detaylı incele" aria-label="Detaylı incele">⤢</button></span></div>' +
         '<div class="ov-kpi-val">' + (o.open_claims || 0) + '</div>' +
         '<div class="ov-kpi-sub">karar bekliyor</div>' +
         ovReasonBars(o.claim_reasons) +
       '</article>';
+    bindOverviewDetailEvents();
 
     $('ovThreshold').value = o.threshold;
     $('ovThresholdLbl').textContent = '(stok ≤ ' + o.threshold + ')';
@@ -2153,6 +2422,12 @@ async function delWebhook(id) {
   try { await api('/api/mp/webhooks/' + encodeURIComponent(id), { method: 'DELETE' }); toast('Webhook silindi.', 'ok'); loadWebhooks(); }
   catch (e) { toast(e.message); }
 }
+
+$('ovDetailBackdrop')?.addEventListener('click', closeOverviewDetail);
+$('ovDetailClose')?.addEventListener('click', closeOverviewDetail);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeOverviewDetail();
+});
 
 // ================= SİPARİŞLER =================
 function fillPlatFilter(selId, platforms) {
@@ -2965,7 +3240,7 @@ switchView('overview');
 </script>
 <script src="/static/assistant-insight.js?v=202607073400"></script>
 <script src="/static/assistant-reports.js?v=202607072500"></script>
-<script src="/static/assistant.js?v=202607074500"></script>
+<script src="/static/assistant.js?v=202607074600"></script>
 <script>
 initAssistantEvents();
 </script>
