@@ -167,6 +167,23 @@
     return "general";
   }
 
+  const GOOD_HEADLINES = {
+    hope: ["Güven veren bir mağazasın", "İtibarın güçlü"],
+    recommend: ["Tavsiye edilen mağazasın", "Müşteriler seni öneriyor"],
+    delight: ["Müşteriyi mutlu ediyorsun", "Deneyim tarafı çok iyi"],
+    early: ["İlk izlenimi iyi yönetiyorsun", "Yeni müşteride güven veriyorsun"],
+    shipping: ["Kargoyu iyi yapıyorsun", "Teslimat hızın güçlü yanın"],
+    quality: ["Kaliteyi tutturuyorsun", "Kalite algın sağlam"],
+    packaging: ["Paketlemeye özen gösteriyorsun", "Paket sunumun iyi"],
+    price: ["Fiyat/performansı yakaladın", "Değer algın güçlü"],
+    effect: ["Ürün gerçekten işe yarıyor", "Sonuç tarafında iyisin"],
+    general: ["Bunu iyi yapıyorsun", "Doğru işi yapıyorsun"],
+  };
+  const GOOD_GENERIC = [
+    "Bunu iyi yapıyorsun", "Güçlü bir yanın", "Bunu böyle sürdür",
+    "Doğru işi yapıyorsun", "Memnuniyeti yakalamışsın",
+  ];
+
   function friendlyGoodAdvice(sample, index) {
     const quote = truncateQuote(sample.text, 70);
     const tone = classifyPositiveTone(sample.text);
@@ -323,7 +340,7 @@
     if (product.negative_pct >= 8) {
       mistakes.push({
         title: "Şikayet devam ederken reklamı artırmak",
-        detail: `"${topLabel}" hâlâ geliyorken daha fazla trafik çekmek, aynı hayal kırıklığını daha çok kişiye yaşatır. Önce ${product.negative_reviews} olumsuz kaydın kök nedenini çöz, sonra bütçeyi artır — yoksa iade ve düşük puan oranı büyür.`,
+        detail: `${sampleQuote ? `Şu yorum ortada dururken ("${truncateQuote(sampleQuote, 55)}") ` : `"${topLabel}" şikayeti sürerken `}daha fazla trafik çekmek aynı hayal kırıklığını daha çok kişiye yaşatır ve iadeyi büyütür. Önce ${product.negative_reviews} olumsuz kaydın kök nedenini çöz; sonra bütçeyi artırınca harcadığın her lira ciroya döner, yoksa reklam parası boşa gider.`,
         topic: topCode,
       });
     }
@@ -389,15 +406,127 @@
         makeEvidence(2, "Sayfaya gerçek ürün fotoğrafı koy", "Stok görseli tek başına yetmeyebilir; boyutu ve dokuyu gösteren bir çekim beklenti sapmasını azaltır.", product, null, product.total_reviews, []),
       ];
     }
+    const used = new Set();
     return positives.slice(0, 3).map((sample, index) => {
-      const shortTitle = truncateQuote(sample.text, 55);
+      const tone = classifyPositiveTone(sample.text);
+      const title = pickUniqueTitle(GOOD_HEADLINES[tone], GOOD_GENERIC, used);
       return makeEvidence(
         index + 1,
-        `Müşteriler: "${shortTitle}"`,
+        title,
         friendlyGoodAdvice(sample, index),
         product, null, product.positive_reviews, [sample]
       );
     });
+  }
+
+  function distinctNegativeSamples(product, limit) {
+    const out = [];
+    const seen = new Set();
+    for (const s of (product.negative_samples || [])) {
+      const t = (s.text || "").trim();
+      if (t.length < 3) continue;
+      const key = t.slice(0, 40).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function friendlyFixAdvice(sample) {
+    const quote = truncateQuote(sample.text, 70);
+    const topic = (sample.category && !GENERIC.has(sample.category))
+      ? sample.category
+      : inferComplaintFromText(sample.text);
+    const map = {
+      beden: `Bak, müşteri "${quote}" demiş — beden/ölçü beklentisi tutmamış. Sayfaya net ölçü tablosu ve "bir beden büyük/küçük tercih edin" notu ekle. Bu küçük dokunuş beden kaynaklı iadeleri ciddi düşürür; iade azaldıkça net ciron kendiliğinden artar.`,
+      kargo: `Bu yorumda "${quote}" diyor — teslimat tarafında canı sıkılmış. Sayfada gerçekçi süre yaz, geciken siparişe kısa bir bilgilendirme/özür mesajı at. Müşteri kendini görülmüş hisseder; 1 yıldız yerine tekrar sipariş bırakır, bu da doğrudan satışa yansır.`,
+      kalite: `Müşteri "${quote}" demiş — eline aldığında beklediğini bulamamış. Aynı temanın kaç yorumda tekrar ettiğine bak; malzeme/işçilikte küçük bir iyileştirme "kalitesiz" yorumlarını keser, puanın yükselir. Yüksek puan = aramada üst sıra = daha çok satış.`,
+      paketleme: `"${quote}" — paket müşteriyi üzmüş. Çift kat kutu/köpük gibi düşük maliyetli bir önlem hasar kaynaklı iadeleri ve olumsuz yorumu bitirir. İade maliyetinden kurtardığın para doğrudan cirona yazar.`,
+      yanlis_urun: `Bu yorumda "${quote}" demiş — yanlış/eksik gönderim güveni hızla düşürür. Paketlemede ürün + adet çift kontrolü (barkod/fotoğraf) uygula. Bu tekrarlayan hatayı bitirir, iadeyi ve puan kaybını durdurur.`,
+      eksik_urun: `Bu yorumda "${quote}" demiş — yanlış/eksik gönderim güveni hızla düşürür. Paketlemede ürün + adet çift kontrolü (barkod/fotoğraf) uygula. Bu tekrarlayan hatayı bitirir, iadeyi ve puan kaybını durdurur.`,
+      fiyat: `"${quote}" — fiyat/değer algısı zorlanmış. Ürünün somut faydasını (ne kazandırdığını) ilk görselde ve başlıkta vurgula; "pahalı" algısı "değer" algısına dönünce dönüşüm oranın artar.`,
+      beklenti: `Müşteri "${quote}" demiş — aldığı, gördüğüyle uyuşmamış. Görsel ve açıklamayı gerçek ürünle birebir eşitle. Beklenti sapması kapanınca hem iade hem olumsuz yorum azalır, memnun müşteri çoğalır.`,
+    };
+    return map[topic] || `Bak, bu müşteri "${quote}" demiş. Bu konuya (şablon cevap değil) somut bir dönüş yap ve süreçte düzelt. Aynı şeyi yaşayıp sessizce giden onlarca alıcı var; buna yoğunlaşman satış kaybını durdurur ve puanını yukarı çeker.`;
+  }
+
+  const FIX_HEADLINES = {
+    beden: ["Beden/ölçü beklentisini netleştir", "Ölçü tablosunu yorumlara göre güncelle"],
+    kargo: ["Teslimat deneyimini iyileştir", "Kargo vaadini gerçekle eşitle"],
+    kalite: ["Kalite algısını yükselt", "Kalite tutarlılığını sağla"],
+    paketleme: ["Paketlemeyi güçlendir", "Hasarsız paket standardı kur"],
+    yanlis_urun: ["Doğru ürün/adet kontrolü yap", "Sipariş hazırlığını çift kontrol et"],
+    eksik_urun: ["Eksik gönderimi önle", "Sipariş hazırlığını çift kontrol et"],
+    fiyat: ["Fiyat/değer algısını yönet", "Değer algısını güçlendir"],
+    beklenti: ["Sayfa ile ürünü birebir eşitle", "Beklenti sapmasını kapat"],
+  };
+  const FIX_GENERIC = [
+    "Bu yorumdaki konuya odaklan", "Bu şikayeti kökten çöz",
+    "Tekrarlayan bu konuyu düzelt", "Bu geri bildirime aksiyon al",
+    "Bu detayı süreçte iyileştir",
+  ];
+
+  function pickUniqueTitle(candidates, generics, used) {
+    for (const c of (candidates || [])) if (c && !used.has(c)) { used.add(c); return c; }
+    for (const g of (generics || [])) if (g && !used.has(g)) { used.add(g); return g; }
+    const base = (candidates && candidates[0]) || (generics && generics[0]) || "Öneri";
+    let i = 2;
+    while (used.has(`${base} (${i})`)) i++;
+    const t = `${base} (${i})`;
+    used.add(t);
+    return t;
+  }
+
+  function buildRecommendations(product, topCode, topLabel, secondCode, secondTopic, sampleQuote, sellerModel) {
+    const items = [];
+    const used = new Set();
+    const push = (title, detail, topic, count, samples) => {
+      if (items.length >= 3) return;
+      items.push(makeEvidence(items.length + 1, title, detail, product, topic || null, count, samples || []));
+    };
+
+    // 1) Gerçek olumsuz yorumları tek tek analiz et — samimi, ciro odaklı
+    for (const s of distinctNegativeSamples(product, 8)) {
+      if (items.length >= 3) break;
+      const topic = (s.category && !GENERIC.has(s.category)) ? s.category : inferComplaintFromText(s.text);
+      const title = pickUniqueTitle(FIX_HEADLINES[topic], FIX_GENERIC, used);
+      push(title, friendlyFixAdvice(s), topic, product.negative_reviews, [s]);
+    }
+
+    // 2) Yeterli olumsuz yorum yoksa konu/olumlu temelli önerilerle 3'e tamamla
+    if (items.length < 3) {
+      const fillers = [];
+      const rec1 = specificRecommendation(product, topCode, topLabel, sampleQuote, sellerModel);
+      fillers.push({ t: rec1.title, d: rec1.detail, topic: topCode, s: samplesForTopic(product, topCode) });
+      const rec2 = secondRecommendation(product, topCode, secondCode, secondTopic, sampleQuote);
+      fillers.push({ t: rec2.title, d: rec2.detail, topic: secondCode, s: [] });
+      const pos = positiveSamples(product)[0];
+      if (pos?.text) {
+        fillers.push({
+          t: "Güçlü yanını başlıkta öne çıkar",
+          d: `"${truncateQuote(pos.text, 60)}" — müşteriler bunu seviyor. Aynı ifadeyi başlık ve ilk görselde vurgula; kararsız alıcı ne alacağını net görünce dönüşüm artar, ciron yükselir.`,
+          topic: null, s: [pos],
+        });
+      }
+      const rec3 = thirdRecommendation(product, topCode, sampleQuote);
+      fillers.push({ t: rec3.title, d: rec3.detail, topic: null, s: [] });
+      fillers.push({
+        t: "Memnun müşteriden gerçek yorum topla",
+        d: "Teslimat sonrası kısa ve samimi bir teşekkür/anket mesajı at (sahte değil). Yorum hacmi arttıkça algoritma güveni ve satış birlikte yükselir.",
+        topic: null, s: [],
+      });
+      for (const f of fillers) {
+        if (items.length >= 3) break;
+        if (used.has(f.t)) continue;
+        used.add(f.t);
+        const cnt = f.topic ? countTopic(product, f.topic) : (product.negative_reviews || product.total_reviews);
+        push(f.t, f.d, f.topic, cnt, f.s);
+      }
+    }
+
+    return items.slice(0, 3);
   }
 
   function buildProductReviewInsight(product, sellerModel) {
@@ -428,26 +557,9 @@
         ? `Biraz dikkat: %${product.negative_pct} olumsuz var ve "${topLabel}" tekrar ediyor. Büyütmeden önce bu konuya bakmak iyi olur.`
         : `Burada ciddi bir sinyal var — %${product.negative_pct} olumsuz, ortalama ${product.average_rating}/5. "${topLabel}" baskın; önce bunu çözmek mantıklı.`;
 
-    const rec1 = specificRecommendation(product, topCode, topLabel, sampleQuote, sellerModel);
-    const rec2 = secondRecommendation(product, topCode, secondCode, secondTopic, sampleQuote);
-    const rec3 = thirdRecommendation(product, topCode, sampleQuote);
-
-    const recommendations = [
-      makeEvidence(1, rec1.title, rec1.detail, product, topCode, product.negative_reviews, samplesForTopic(product, topCode)),
-      makeEvidence(2, rec2.title, rec2.detail, product, secondCode, secondCode ? countTopic(product, secondCode) : product.positive_reviews, []),
-      makeEvidence(3, rec3.title, rec3.detail, product, null, product.negative_reviews || product.total_reviews, []),
-    ];
+    const recommendations = buildRecommendations(product, topCode, topLabel, secondCode, secondTopic, sampleQuote, sellerModel);
 
     const avoidActions = buildAvoidMistakes(product, topCode, topLabel, sampleQuote, sellerModel);
-
-    const applySeller = items => {
-      if (!sellerModel) return items;
-      return items.map(item => ({
-        ...item,
-        title: tailorRecommendationTitle(item.title, sellerModel),
-        detail: tailorRecommendationDetail(item.detail, sellerModel, topLabel),
-      }));
-    };
 
     return {
       verdict, statsLine, verdictTone,
@@ -456,7 +568,7 @@
         negative: product.negative_pct,
         neutral: Math.max(0, 100 - product.positive_pct - product.negative_pct),
       },
-      recommendations: applySeller(recommendations.slice(0, 3)),
+      recommendations: recommendations.slice(0, 3),
       avoidActions: avoidActions.slice(0, 3),
       goodPractices: buildGoodPractices(product).slice(0, 3),
     };

@@ -23,7 +23,7 @@
     stats: null, consultantStats: null, insights: null,
     reportDays: 7, reportChart: "pie", reportReviewMode: "sentiment",
     reportData: null, reportLoading: false, reportError: null, reportDemo: false,
-    expandedSku: null, selectedSku: null,
+    expandedSku: null, selectedSku: null, reviewsMaximized: false,
     cargoPeriod: 7, cargoPlatform: "all", cargoStatus: "all",
     returnsPeriod: 7, returnsPlatform: "all",
     cargoData: null, returnsData: null,
@@ -195,6 +195,7 @@
     return items.map((item, i) => `
       <article class="evidence-card evidence-${variant} rev-evidence">
         <p class="evidence-title rev-evidence-title">${esc(item.title)}</p>
+        ${item.detail ? `<p class="evidence-detail rev-evidence-detail">${esc(item.detail)}</p>` : ""}
         ${variant !== "good" && item.evidenceCount ? `<p class="evidence-stat">${item.evidenceCount} yorumda geçiyor · toplamın %${item.evidencePct}'i</p>` : ""}
         ${item.sampleComments?.length ? `<button type="button" class="rev-evidence-link" data-ev-idx="${i}">▶ Yorumlara bak (${item.sampleComments.length})</button>
         <div class="rev-evidence-comments hidden" id="revEvComments${i}"><ul>${item.sampleComments.map(c => `<li>★${c.rating} — ${esc(c.text)}</li>`).join("")}</ul></div>` : ""}
@@ -253,6 +254,61 @@
       }).join("")}</div>`;
   }
 
+  const REV_MAXIMIZE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>';
+  const REV_MINIMIZE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9h4V5"/><path d="M19 9h-4V5"/><path d="M5 15h4v4"/><path d="M19 15h-4v4"/></svg>';
+
+  function onRevEscKey(e) {
+    if (e.key === "Escape") setReviewsMaximized(false);
+  }
+
+  // Büyütülmüş panel + blur katmanı, body seviyesinde tek bir overlay içinde
+  // durur; böylece panel blur'un ÜSTÜNDE kalır, arkadaki her şey bulanıklaşır.
+  function getRevOverlay() {
+    let ov = document.getElementById("revModalOverlay");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "revModalOverlay";
+      ov.className = "rev-modal-overlay";
+      const bd = document.createElement("div");
+      bd.className = "rev-modal-backdrop";
+      bd.addEventListener("click", () => setReviewsMaximized(false));
+      ov.appendChild(bd);
+      document.body.appendChild(ov);
+    }
+    return ov;
+  }
+
+  function removeRevOverlay() {
+    document.getElementById("revModalOverlay")?.remove();
+    document.body.classList.remove("rev-modal-open");
+  }
+
+
+  function setReviewsMaximized(on) {
+    if (!!on === state.reviewsMaximized) return;
+    if (on) {
+      state.reviewsMaximized = true;
+      document.removeEventListener("keydown", onRevEscKey);
+      document.addEventListener("keydown", onRevEscKey);
+      renderReviewsDashboard();
+    } else {
+      state.reviewsMaximized = false;
+      document.removeEventListener("keydown", onRevEscKey);
+      const ov = document.getElementById("revModalOverlay");
+      if (ov) {
+        ov.classList.add("out");
+        ov.querySelector(".rev-dashboard")?.classList.add("rev-maximized-out");
+        setTimeout(() => {
+          removeRevOverlay();
+          renderReviewsDashboard();
+        }, 230);
+      } else {
+        removeRevOverlay();
+        renderReviewsDashboard();
+      }
+    }
+  }
+
   function renderProductInsightDashboard(product) {
     const insight = AI().buildProductReviewInsight(product, state.sellerModel);
     const complaintCount = product.negative_reviews || 0;
@@ -265,7 +321,13 @@
         <div class="rev-dashboard-bg" aria-hidden="true"></div>
         <div class="rev-dashboard-grid">
           <div class="rev-kilit-card">
-            <h3 class="rev-kilit-title">Kilit Metrikler</h3>
+            <div class="rev-kilit-topbar">
+              <button type="button" class="rev-maximize-btn" data-rev-maximize
+                aria-label="${state.reviewsMaximized ? "Küçült" : "Tam ekran"}"
+                title="${state.reviewsMaximized ? "Küçült" : "Tam ekran"}">
+                ${state.reviewsMaximized ? REV_MINIMIZE_SVG : REV_MAXIMIZE_SVG}
+              </button>
+            </div>
             <div class="rev-kpi-row">
               <div class="rev-kpi tone-violet">
                 <span class="rev-kpi-icon" aria-hidden="true">💬</span>
@@ -310,6 +372,12 @@
   function bindReviewsDashboard(root) {
     if (!root) return;
     root.onclick = e => {
+      const maxBtn = e.target.closest("[data-rev-maximize]");
+      if (maxBtn) {
+        e.stopPropagation();
+        setReviewsMaximized(!state.reviewsMaximized);
+        return;
+      }
       const del = e.target.closest("[data-del]");
       if (del) {
         e.stopPropagation();
@@ -348,6 +416,8 @@
     const root = $("revDashboardRoot");
     if (!root) return;
     if (!state.products.length) {
+      if (state.reviewsMaximized) state.reviewsMaximized = false;
+      removeRevOverlay();
       root.innerHTML = `
         <div class="rev-dashboard">
           <div class="rev-dashboard-bg" aria-hidden="true"></div>
@@ -359,8 +429,25 @@
     }
     const product = state.products.find(p => p.sku === state.expandedSku) || state.products[0];
     if (!state.expandedSku) state.expandedSku = product.sku;
-    root.innerHTML = renderProductInsightDashboard(product);
-    bindReviewsDashboard(root);
+    const html = renderProductInsightDashboard(product);
+
+    if (state.reviewsMaximized) {
+      // Panel'i body seviyesindeki overlay'e taşı (blur'un üstünde kalsın).
+      root.innerHTML = "";
+      const ov = getRevOverlay();
+      ov.querySelector(".rev-dashboard")?.remove();
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      const dash = tmp.firstElementChild;
+      dash.classList.add("rev-maximized");
+      ov.appendChild(dash);
+      document.body.classList.add("rev-modal-open");
+      bindReviewsDashboard(dash);
+    } else {
+      removeRevOverlay();
+      root.innerHTML = html;
+      bindReviewsDashboard(root);
+    }
   }
 
   function renderImportPanel() {
@@ -368,7 +455,6 @@
     const linkPanel = `
       <div class="scrape-zone">
         <strong>${copy.title}</strong>
-        <p class="hint">${copy.hint}</p>
         <div class="scrape-row">
           <input id="scrapeUrlInput" type="url" placeholder="${copy.placeholder}">
           <button id="scrapeSubmitBtn" class="primary-sm">Analiz</button>
@@ -389,8 +475,6 @@
           <button class="import-tab${state.importMode === "link" ? " on" : ""}" data-mode="link">Link ile çek</button>
           <button class="import-tab${state.importMode === "csv" ? " on" : ""}" data-mode="csv">CSV ile</button>
         </div>
-        <p class="hint" style="margin:10px 0 6px">Hızlı başlamak için mağazanıza uygun örnek yorum ve sipariş verisi:</p>
-        <button type="button" class="mini-btn" id="seedDemoBtn">Örnek veri yükle</button>
         ${state.importMode === "link" ? linkPanel : csvPanel}
       </div>`;
 
@@ -1067,7 +1151,6 @@
     try {
       const d = await api("/api/assistant/returns");
       renderReturnsPanelBody(d);
-      await refreshData();
     } catch (e) {
       const body = $("returnsPanelBody");
       if (body) body.innerHTML = `<p class="ops-empty">${esc(e.message)}</p>`;
@@ -1233,6 +1316,11 @@
 
   function syncImmersiveModes() {
     const inSection = state.view === "section" && !$("asSectionView")?.classList.contains("hidden");
+    if (state.reviewsMaximized && !(inSection && state.section === "reviews")) {
+      state.reviewsMaximized = false;
+      document.removeEventListener("keydown", onRevEscKey);
+      removeRevOverlay();
+    }
     document.body.classList.toggle("reviews-immersive", inSection && state.section === "reviews");
     document.body.classList.toggle("consultant-immersive", inSection && state.section === "analysis");
     document.body.classList.toggle("ops-immersive", inSection && (state.section === "cargo" || state.section === "returns"));

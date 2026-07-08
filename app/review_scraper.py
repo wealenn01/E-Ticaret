@@ -34,7 +34,8 @@ _HERMES_REVIEWS_API = (
     "https://user-content-gw-hermes.hepsiburada.com/queryapi/v2/ApprovedUserContents"
 )
 _TRENDYOL_REVIEWS_API = (
-    "https://apigw.trendyol.com/discovery-web-websfxsocialreviewrating-santral/product-reviews-detailed"
+    "https://apigw.trendyol.com/discovery-storefront-trproductgw-service"
+    "/api/review-read/product-reviews/detailed"
 )
 _CURL_IMPERSONATE = "chrome131"
 _TR_MONTHS = {
@@ -57,6 +58,28 @@ _TR_MONTHS = {
     "aralik": 12,
     "aralık": 12,
 }
+
+
+def _target_review_count(total_available: int | None) -> int:
+    """Toplam yorum sayısına göre en yeni yorumlardan çekilecek hedef adet.
+
+    - 500 ve üzeri : en yeni %20
+    - 150 – 499    : en yeni %30
+    - 0 – 149      : en yeni %40
+    Üst sınır MAX_REVIEWS (400) ile sınırlanır (çok büyük ürünlerde
+    "en az 400 en yeni yorum" hedefi korunur, aşırı çekim engellenir).
+    """
+    total = int(total_available or 0)
+    if total <= 0:
+        return MAX_REVIEWS
+    if total < 150:
+        pct = 0.40
+    elif total < 500:
+        pct = 0.30
+    else:
+        pct = 0.20
+    target = max(1, round(total * pct))
+    return min(target, MAX_REVIEWS)
 
 
 def _platform_label(platform: str) -> str:
@@ -468,6 +491,24 @@ async def fetch_product_page_meta(url: str, platform: str) -> dict:
     }
 
 
+def _epoch_ms_to_date(value) -> date | None:
+    """Trendyol epoch (ms veya s) zaman damgasını tarihe çevirir."""
+    try:
+        ts = int(value)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    if ts > 10_000_000_000:  # milisaniye
+        ts //= 1000
+    from datetime import datetime, timezone
+
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).date()
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
 def _parse_date(value: str | None) -> date:
     if not value:
         return date.today()
@@ -669,13 +710,14 @@ async def fetch_hepsiburada_reviews_api(sku: str) -> tuple[list[dict], dict]:
     offset = 0
     page_size = 50
     total_available = 0
+    target = MAX_REVIEWS
 
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=FETCH_TIMEOUT,
         headers=_browser_headers("hepsiburada", accept="application/json, text/plain, */*"),
     ) as client:
-        while len(collected) < MAX_REVIEWS:
+        while len(collected) < target:
             response = await client.get(
                 _HERMES_REVIEWS_API,
                 params={
@@ -689,6 +731,8 @@ async def fetch_hepsiburada_reviews_api(sku: str) -> tuple[list[dict], dict]:
             response.raise_for_status()
             payload = response.json()
             total_available = int(payload.get("totalItemCount") or 0)
+            if total_available:
+                target = _target_review_count(total_available)
             items = (
                 payload.get("data", {})
                 .get("approvedUserContent", {})
@@ -704,7 +748,7 @@ async def fetch_hepsiburada_reviews_api(sku: str) -> tuple[list[dict], dict]:
                 if not product_name and parsed.get("product_name"):
                     product_name = str(parsed["product_name"])
                 collected.append(parsed)
-                if len(collected) >= MAX_REVIEWS:
+                if len(collected) >= target:
                     break
 
             offset += len(items)
@@ -859,10 +903,11 @@ async def fetch_n11_reviews_api(product_id: str, source_url: str) -> tuple[list[
     collected: list[dict] = []
     product_name = ""
     total_available = 0
+    target = MAX_REVIEWS
     page = 1
     review_referer = f"https://www.n11.com/product-reviews/{product_id}"
 
-    while len(collected) < MAX_REVIEWS:
+    while len(collected) < target:
         api_url = f"https://www.n11.com/getProductReviews/{product_id}?currentPage={page}"
         status_code, text = await _curl_get(
             api_url,
@@ -886,6 +931,8 @@ async def fetch_n11_reviews_api(product_id: str, source_url: str) -> tuple[list[
             or (payload.get("reviewStatistics") or {}).get("commentCount")
             or 0
         )
+        if total_available:
+            target = _target_review_count(total_available)
         items = payload.get("productFeedBackReviewList") or []
         if not items:
             break
@@ -897,7 +944,7 @@ async def fetch_n11_reviews_api(product_id: str, source_url: str) -> tuple[list[
             if not product_name and parsed.get("product_name"):
                 product_name = str(parsed["product_name"])
             collected.append(parsed)
-            if len(collected) >= MAX_REVIEWS:
+            if len(collected) >= target:
                 break
 
         pagination = payload.get("pagination") or {}
@@ -935,12 +982,17 @@ def _parse_trendyol_review_item(item: dict) -> dict | None:
         return None
     if not 1 <= rating <= 5:
         return None
+    raw_date = (
+        item.get("createdAt")
+        or item.get("lastModifiedAt")
+        or item.get("lastModifiedDate")
+        or item.get("commentDateISOtype")
+    )
+    review_date = _epoch_ms_to_date(raw_date) or _parse_date(str(raw_date or ""))
     return {
         "rating": rating,
         "comment_text": text[:4000],
-        "review_date": _parse_date(
-            str(item.get("lastModifiedDate") or item.get("commentDateISOtype") or "")
-        ),
+        "review_date": review_date,
     }
 
 
@@ -1034,36 +1086,61 @@ async def _fetch_trendyol_reviews_from_html(product_url: str) -> tuple[list[dict
 async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[list[dict], dict]:
     """Fetch reviews from Trendyol's public discovery review API."""
     product_url = normalize_product_page_url(source_url, "trendyol")
+    yorumlar_url = _trendyol_yorumlar_page_url(product_url)
     await _curl_get(product_url, headers=_browser_headers("trendyol", referer=product_url))
     collected: list[dict] = []
     total_available = 0
-    page = 1
+    total_pages = 0
+    target = MAX_REVIEWS
+    page = 0
+    page_size = 50
     headers = _browser_headers(
         "trendyol",
         accept="application/json, text/plain, */*",
-        referer=source_url,
+        referer=yorumlar_url,
     )
 
-    while len(collected) < MAX_REVIEWS:
-        status_code, text = await _curl_get(
-            _TRENDYOL_REVIEWS_API,
-            headers=headers,
-            params={
-                "contentId": content_id,
-                "page": page,
-                "order": "DESC",
-                "orderBy": "LastModifiedDate",
-                "channelId": 1,
-            },
-        )
-        if status_code in (403, 556, 503):
+    while len(collected) < target:
+        status_code, text = 0, ""
+        # Geçici gateway hatalarına (556/503) karşı aynı sayfayı birkaç kez dene.
+        for attempt in range(3):
+            status_code, text = await _curl_get(
+                _TRENDYOL_REVIEWS_API,
+                headers=headers,
+                params={
+                    "contentId": content_id,
+                    "page": page,
+                    "pageSize": page_size,
+                    "order": "DESC",
+                    "orderBy": "CreatedDate",
+                    "channelId": 1,
+                },
+            )
+            if status_code == 200:
+                break
+            if status_code in (403, 556, 503) and attempt < 2:
+                await asyncio.sleep(0.8 * (attempt + 1))
+                continue
             break
-        if status_code >= 400:
+        if status_code != 200:
             break
         payload = json.loads(text)
-        reviews_block = (payload.get("result") or {}).get("productReviews") or {}
-        total_available = int(reviews_block.get("totalElements") or 0)
-        items = reviews_block.get("content") or []
+        result = payload.get("result") or {}
+        summary = result.get("summary") or {}
+        # summary yalnızca ilk sayfada gelir; değerleri koru, sonraki sayfalarda sıfırlama.
+        new_total = int(
+            summary.get("totalCommentCount")
+            or summary.get("totalReviewCount")
+            or summary.get("totalRatingCount")
+            or 0
+        )
+        if new_total:
+            total_available = new_total
+            target = _target_review_count(total_available)
+        new_pages = int(summary.get("totalPages") or 0)
+        if new_pages:
+            total_pages = new_pages
+        items = result.get("reviews") or []
         if not items:
             break
 
@@ -1072,12 +1149,13 @@ async def fetch_trendyol_reviews_api(content_id: str, source_url: str) -> tuple[
             if not parsed:
                 continue
             collected.append(parsed)
-            if len(collected) >= MAX_REVIEWS:
+            if len(collected) >= target:
                 break
 
-        total_pages = int(reviews_block.get("totalPages") or 0)
         page += 1
-        if page >= total_pages:
+        if total_pages and page >= total_pages:
+            break
+        if len(items) < page_size:
             break
 
     if not collected:
@@ -1111,7 +1189,8 @@ def _rows_from_raw_reviews(
             seen.add(key)
             unique.append(r)
 
-    raw_reviews = unique[:MAX_REVIEWS]
+    limit = _target_review_count(total_available) if total_available is not None else MAX_REVIEWS
+    raw_reviews = unique[:limit]
     if not raw_reviews:
         raise ValueError(
             "Bu sayfadan yorum çıkarılamadı. Ürünün yorumlar sekmesi linkini deneyin "

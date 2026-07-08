@@ -111,6 +111,32 @@ html[data-theme="dark"] body {
   color: var(--tl-text);
 }
 
+/* Koyu moda uyumlu kaydırma çubuğu */
+html[data-theme="dark"] {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 124, 246, 0.4) transparent;
+}
+html[data-theme="dark"] ::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+html[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(139, 124, 246, 0.38);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.6);
+  background-clip: padding-box;
+}
+html[data-theme="dark"] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 html[data-theme="dark"] .sidebar {
   background: var(--tl-bg2);
   border-right-color: var(--tl-border);
