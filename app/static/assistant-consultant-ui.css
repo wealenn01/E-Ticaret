@@ -9,7 +9,8 @@
 
 .consultant-grid {
   display: grid;
-  grid-template-columns: 35% 65%;
+  /* Varsayilan oran */
+  grid-template-columns: 44% 56%;
   flex: 1;
   min-height: 0;
   gap: 0;
@@ -544,6 +545,8 @@ body.view-assistant.consultant-immersive .wrap {
 .as-workspace:has(#asSectionView:not(.hidden) #panelAnalysis:not(.hidden)) .consultant-grid {
   border-color: var(--tl-border);
   background: var(--tl-bg);
+  /* Danisman cevabi alani saga dogru genis */
+  grid-template-columns: 44% 56% !important;
 }
 .as-workspace:has(#asSectionView:not(.hidden) #panelAnalysis:not(.hidden)) .consultant-side {
   background: var(--tl-side);
@@ -558,4 +561,5 @@ body.view-assistant.consultant-immersive .wrap {
 
 #viewAssistant.as-bleed #panelAnalysis .consultant-shell {
   width: 100%;
+  max-width: 100%;
 }

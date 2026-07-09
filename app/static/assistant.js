@@ -552,20 +552,42 @@
   }
 
   async function refreshData() {
-    const [products, allProducts, stats, consultantStats, settings] = await Promise.all([
+    // Ilk ekrani hizli gostermek icin kritik verileri once yukle,
+    // daha agir "tum platform" verilerini ikinci dalgada getir.
+    const [productsRes, statsRes, settingsRes] = await Promise.allSettled([
       api("/api/assistant/products?platform=" + state.platform),
-      api("/api/assistant/products?platform=all"),
       api("/api/assistant/stats?platform=" + state.platform),
-      api("/api/assistant/stats?platform=all"),
       api("/api/assistant/settings"),
     ]);
-    state.products = products.products || [];
-    state.allProducts = allProducts.products || [];
-    state.allProductCount = allProducts.total_products || 0;
-    state.stats = stats;
-    state.consultantStats = consultantStats;
-    state.platform = settings.platform || state.platform;
-    state.sellerModel = settings.seller_model || null;
+
+    if (settingsRes.status === "fulfilled") {
+      const settings = settingsRes.value || {};
+      state.platform = settings.platform || state.platform;
+      state.sellerModel = settings.seller_model || null;
+    }
+    if (productsRes.status === "fulfilled") {
+      state.products = productsRes.value?.products || [];
+    }
+    if (statsRes.status === "fulfilled") {
+      state.stats = statsRes.value || null;
+    }
+
+    // Hemen ilk gorunumu ciz.
+    renderAll();
+
+    const [allProductsRes, consultantStatsRes] = await Promise.allSettled([
+      api("/api/assistant/products?platform=all"),
+      api("/api/assistant/stats?platform=all"),
+    ]);
+
+    if (allProductsRes.status === "fulfilled") {
+      state.allProducts = allProductsRes.value?.products || [];
+      state.allProductCount = allProductsRes.value?.total_products || 0;
+    }
+    if (consultantStatsRes.status === "fulfilled") {
+      state.consultantStats = consultantStatsRes.value || null;
+    }
+
     renderAll();
   }
 
@@ -1342,21 +1364,29 @@
     else if (state.section === "returns") renderReturnsSection();
   }
 
-  window.loadAssistant = async function () {
-    try {
-      state.view = "hub";
-      const settings = await api("/api/assistant/settings");
-      state.platform = settings.platform || "trendyol";
-      state.sellerModel = settings.seller_model || null;
+  window.loadAssistant = function () {
+    state.view = "hub";
+    syncImmersiveModes();
+    // Gecikme hissini azaltmak icin ilk cizimi hemen yap.
+    renderAll();
+    (async () => {
+      try {
+        const settings = await api("/api/assistant/settings");
+        state.platform = settings.platform || "trendyol";
+        state.sellerModel = settings.seller_model || null;
+      } catch (_) {}
       try {
         const st = await api("/api/status");
         if (st.review_scraper_build !== "ldjson-v2") {
           toast("Eski sunucu sürümü algılandı — run.bat ile yeniden başlatın (gerekirse 8765 portu).", "err");
         }
       } catch (_) {}
-      syncImmersiveModes();
-      await refreshData();
-    } catch (e) { toast(e.message, "err"); }
+      try {
+        await refreshData();
+      } catch (e) {
+        toast(e.message, "err");
+      }
+    })();
   };
 
   window.initAssistantEvents = function () {
