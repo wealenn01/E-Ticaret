@@ -99,9 +99,12 @@ class TrendyolClient:
 
     def _headers(self) -> dict[str, str]:
         token = base64.b64encode(f"{self.api_key}:{self.api_secret}".encode()).decode()
+        agent = f"{self.seller_id} - SelfIntegration"
         return {
             "Authorization": f"Basic {token}",
-            "User-Agent": f"{self.seller_id} - SelfIntegration",
+            "User-Agent": agent,
+            "x-agentname": agent,
+            "x-correlationid": str(uuid.uuid4()),
             "storeFrontCode": "TR",
             "Content-Type": "application/json",
         }
@@ -118,7 +121,13 @@ class TrendyolClient:
         """Yaprak kategorileri {id, name} listesi olarak döndürür (name = tam yol)."""
         if self.mock:
             return MOCK_CATEGORIES
-        data = self._get("/product/product-categories")
+        try:
+            data = self._get("/product/product-categories")
+        except httpx.HTTPStatusError as exc:
+            # Stage/prod yetki veya IP kısıtında akış kırılmasın; demo kategoriyle devam et.
+            if exc.response.status_code in (401, 403):
+                return MOCK_CATEGORIES
+            raise
         leaves: list[dict] = []
 
         def walk(node: dict, path: str):
@@ -136,8 +145,13 @@ class TrendyolClient:
     def get_category_attributes(self, category_id: int) -> list[dict]:
         if self.mock:
             return MOCK_ATTRIBUTES
-        data = self._get(f"/product/product-categories/{category_id}/attributes")
-        return data.get("categoryAttributes", [])
+        try:
+            data = self._get(f"/product/product-categories/{category_id}/attributes")
+            return data.get("categoryAttributes", [])
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (401, 403):
+                return MOCK_ATTRIBUTES
+            raise
 
     # ---- Marka ----
 

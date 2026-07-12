@@ -468,3 +468,172 @@ body.view-assistant.reviews-immersive .wrap {
 .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden)) #importPanel {
   margin-bottom: 10px;
 }
+
+/* ═══════════════════════════════════════════════
+   Aydınlık mod — Yorumlar paneli
+   (karanlık stiller dokunulmaz; yalnızca light)
+   ═══════════════════════════════════════════════ */
+html:not([data-theme="dark"]) .rev-panel {
+  color: var(--tl-text, #2b2640);
+}
+
+html:not([data-theme="dark"]) #panelReviews .import-compact .scrape-zone {
+  background: var(--card, #fff);
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: var(--shadow, 0 2px 8px rgba(43, 38, 64, 0.05));
+}
+html:not([data-theme="dark"]) #panelReviews .import-compact .scrape-zone input {
+  background: var(--bg, #fbfaff);
+  border-color: var(--border, #edeaf5);
+  color: var(--ink, #2b2640);
+}
+
+html:not([data-theme="dark"]) .rev-dashboard {
+  background: transparent;
+  border-color: transparent;
+}
+html:not([data-theme="dark"]) .rev-dashboard-bg {
+  opacity: 0.18;
+  filter: saturate(0.7) brightness(1.35);
+}
+html:not([data-theme="dark"]) .rev-dashboard-bg::after {
+  background: linear-gradient(105deg, rgba(251, 250, 255, 0.96) 0%, rgba(251, 250, 255, 0.82) 48%, rgba(251, 250, 255, 0.55) 100%);
+}
+
+html:not([data-theme="dark"]) .rev-maximize-btn {
+  color: #6b5fd4;
+  background: #fff;
+  border: 1px solid rgba(139, 124, 246, 0.35);
+  box-shadow: 0 2px 8px rgba(43, 38, 64, 0.08);
+}
+html:not([data-theme="dark"]) .rev-maximize-btn:hover {
+  color: #4f46a8;
+  background: #f5f2ff;
+  border-color: rgba(139, 124, 246, 0.55);
+  box-shadow: 0 4px 14px rgba(139, 124, 246, 0.2);
+}
+
+html:not([data-theme="dark"]) .rev-dashboard.rev-maximized {
+  background: linear-gradient(160deg, #fbfaff 0%, #f5f3ff 55%, #faf9ff 100%);
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 20px 60px rgba(43, 38, 64, 0.18);
+}
+html:not([data-theme="dark"]) .rev-dashboard.rev-maximized .rev-kilit-head {
+  background: #fbfaff;
+}
+html:not([data-theme="dark"]) .rev-modal-backdrop {
+  background: rgba(43, 38, 64, 0.28);
+}
+
+html:not([data-theme="dark"]) .rev-kilit-card {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: var(--shadow, 0 2px 12px rgba(43, 38, 64, 0.07));
+  scrollbar-color: rgba(139, 124, 246, 0.35) transparent;
+}
+
+html:not([data-theme="dark"]) .rev-kpi {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.04);
+}
+html:not([data-theme="dark"]) .rev-kpi::after {
+  background: radial-gradient(ellipse at top, rgba(139, 124, 246, 0.18), rgba(45, 212, 191, 0.06) 58%, transparent 78%);
+}
+html:not([data-theme="dark"]) .rev-kpi.tone-rose::after {
+  background: radial-gradient(ellipse at top, rgba(251, 113, 133, 0.18), rgba(240, 136, 95, 0.06) 58%, transparent 78%);
+}
+html:not([data-theme="dark"]) .rev-kpi-val { color: var(--ink, #2b2640); }
+html:not([data-theme="dark"]) .rev-kpi-lbl { color: var(--muted, #7b7690); }
+
+html:not([data-theme="dark"]) .rev-sentiment-label { color: #6b5fd4; }
+html:not([data-theme="dark"]) .rev-sentiment-track {
+  background: #eceaf5;
+}
+html:not([data-theme="dark"]) .rev-sentiment-legend { color: var(--muted, #7b7690); }
+
+html:not([data-theme="dark"]) .rev-evidence {
+  background: #faf9ff;
+  border: 1px solid var(--border, #edeaf5);
+}
+html:not([data-theme="dark"]) .rev-evidence-title,
+html:not([data-theme="dark"]) .evidence-good .rev-evidence-title,
+html:not([data-theme="dark"]) .evidence-do .rev-evidence-title,
+html:not([data-theme="dark"]) .evidence-avoid .rev-evidence-title {
+  color: var(--ink, #2b2640);
+}
+html:not([data-theme="dark"]) .rev-evidence-detail {
+  color: #4a4560;
+}
+html:not([data-theme="dark"]) .rev-evidence-link {
+  color: #6b5fd4;
+  text-shadow: none;
+}
+html:not([data-theme="dark"]) .rev-evidence-comments {
+  background: #f3f1fa;
+  border: 1px solid var(--border, #edeaf5);
+  color: #5a5570;
+}
+html:not([data-theme="dark"]) .rev-footer-tip {
+  border-top-color: var(--border, #edeaf5);
+  color: var(--muted, #7b7690);
+}
+
+html:not([data-theme="dark"]) .rev-stage-title {
+  color: #6b5fd4;
+  text-shadow: none;
+}
+html:not([data-theme="dark"]) .rev-side-metric {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.04);
+  backdrop-filter: none;
+}
+html:not([data-theme="dark"]) .rev-side-metric-val { color: var(--ink, #2b2640); }
+html:not([data-theme="dark"]) .rev-side-metric-lbl { color: var(--muted, #7b7690); }
+
+html:not([data-theme="dark"]) .rev-product-box {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 2px 8px rgba(43, 38, 64, 0.06);
+}
+html:not([data-theme="dark"]) .rev-product-box:hover {
+  border-color: rgba(139, 124, 246, 0.45);
+  box-shadow: 0 8px 20px rgba(139, 124, 246, 0.14);
+}
+html:not([data-theme="dark"]) .rev-product-box.on {
+  border-color: rgba(139, 124, 246, 0.55);
+  box-shadow: 0 0 0 2px rgba(139, 124, 246, 0.18), 0 6px 18px rgba(139, 124, 246, 0.12);
+}
+html:not([data-theme="dark"]) .rev-box-letter {
+  color: #6b5fd4;
+  background: linear-gradient(160deg, rgba(139, 124, 246, 0.1), rgba(249, 177, 124, 0.06));
+}
+html:not([data-theme="dark"]) .rev-box-title {
+  color: var(--ink, #2b2640);
+}
+html:not([data-theme="dark"]) .rev-empty-stage p { color: var(--muted, #7b7690); }
+html:not([data-theme="dark"]) .rev-empty-stage strong { color: #6b5fd4; }
+
+/* Workspace arka plan + toolbar — aydınlık */
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden))::before {
+  background:
+    radial-gradient(ellipse 55% 45% at 82% 32%, rgba(45, 212, 191, 0.07) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 35% at 12% 78%, rgba(232, 121, 160, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 65% 50% at 70% 55%, rgba(139, 124, 246, 0.08) 0%, transparent 58%),
+    linear-gradient(160deg, #fbfaff 0%, #f5f3ff 45%, #faf9ff 100%);
+}
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden)) .as-back-btn,
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden)) .platform-select {
+  background: #fff;
+  border-color: var(--border, #edeaf5);
+  color: var(--ink, #2b2640);
+  backdrop-filter: none;
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.05);
+}
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden)) .as-bar-title {
+  color: var(--ink, #2b2640);
+}
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReviews:not(.hidden)) .platform-label {
+  color: var(--muted, #7b7690);
+}

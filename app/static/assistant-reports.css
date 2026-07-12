@@ -317,3 +317,159 @@ body.view-assistant .main { padding-left: 8px; padding-right: 8px; }
     grid-template-columns: minmax(240px, 1fr) minmax(480px, 2.6fr) minmax(170px, 0.72fr);
   }
 }
+
+/* ═══════════════════════════════════════════════
+   Aydınlık mod — Raporlar
+   (karanlık stiller dokunulmaz; yalnızca light)
+   ═══════════════════════════════════════════════ */
+html:not([data-theme="dark"]) .reports-panel {
+  background: #fbfaff !important;
+  border-color: var(--border, #edeaf5) !important;
+  box-shadow: 0 2px 16px rgba(43, 38, 64, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+html:not([data-theme="dark"]) .rp-sidebar {
+  background: linear-gradient(180deg, rgba(139, 124, 246, 0.06), transparent 70%);
+}
+html:not([data-theme="dark"]) .rp-sidebar .consultant-badge {
+  background: rgba(139, 124, 246, 0.1);
+  border-color: rgba(139, 124, 246, 0.28);
+  color: #6b5fd4;
+}
+
+html:not([data-theme="dark"]) .rp-side-btn {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  color: var(--ink, #2b2640);
+  box-shadow: 0 1px 2px rgba(43, 38, 64, 0.03);
+}
+html:not([data-theme="dark"]) .rp-side-btn:hover {
+  background: #f5f2ff;
+  color: #4f46a8;
+  border-color: rgba(139, 124, 246, 0.35);
+}
+html:not([data-theme="dark"]) .rp-side-btn.on {
+  background: linear-gradient(135deg, rgba(139, 124, 246, 0.16), rgba(139, 124, 246, 0.06));
+  color: #5b4fd4;
+  border-color: rgba(139, 124, 246, 0.45);
+  box-shadow: 0 0 0 1px rgba(139, 124, 246, 0.12);
+}
+
+html:not([data-theme="dark"]) .rp-mesh-line {
+  stroke: rgba(139, 124, 246, 0.18);
+}
+html:not([data-theme="dark"]) .rp-mesh-node {
+  fill: rgba(139, 124, 246, 0.55);
+  filter: drop-shadow(0 0 4px rgba(139, 124, 246, 0.35));
+}
+html:not([data-theme="dark"]) .rp-bg-grid {
+  opacity: 0.35;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 45% 35%, rgba(139, 124, 246, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 75% 60%, rgba(45, 212, 191, 0.05) 0%, transparent 55%),
+    linear-gradient(rgba(139, 124, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 124, 246, 0.04) 1px, transparent 1px);
+}
+html:not([data-theme="dark"]) .rp-flow-lines {
+  opacity: 0.3;
+}
+
+html:not([data-theme="dark"]) .rp-demo-banner {
+  background: rgba(232, 168, 74, 0.1);
+  border-color: rgba(232, 168, 74, 0.3);
+  color: #b45309;
+}
+
+html:not([data-theme="dark"]) .rp-widget {
+  background: #fff;
+  border-color: var(--border, #edeaf5);
+  box-shadow: 0 2px 10px rgba(43, 38, 64, 0.06);
+  backdrop-filter: none;
+}
+html:not([data-theme="dark"]) .rp-widget::before {
+  background: radial-gradient(ellipse 90% 60% at 50% -30%, rgba(139, 124, 246, 0.06), transparent 65%);
+}
+html:not([data-theme="dark"]) .rp-widget:hover {
+  border-color: rgba(139, 124, 246, 0.35);
+  box-shadow: 0 4px 16px rgba(139, 124, 246, 0.1);
+}
+
+html:not([data-theme="dark"]) .rp-donut {
+  filter: drop-shadow(0 0 10px rgba(139, 124, 246, 0.12));
+}
+html:not([data-theme="dark"]) .rp-donut-pct {
+  fill: #fff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+html:not([data-theme="dark"]) .rp-donut-total {
+  color: var(--ink, #2b2640);
+  text-shadow: none;
+}
+html:not([data-theme="dark"]) .rp-donut-chart::after {
+  box-shadow: 0 0 30px rgba(139, 124, 246, 0.1);
+}
+
+/* Metrik kartları — beyaz */
+html:not([data-theme="dark"]) .rp-metric-card {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.05);
+  backdrop-filter: none;
+}
+html:not([data-theme="dark"]) .rp-metric-title {
+  color: var(--muted, #7b7690);
+}
+html:not([data-theme="dark"]) .rp-trend.up {
+  color: #be123c;
+  background: rgba(251, 113, 133, 0.12);
+}
+html:not([data-theme="dark"]) .rp-trend.down {
+  color: #0f766e;
+  background: rgba(45, 212, 191, 0.12);
+}
+
+html:not([data-theme="dark"]) .rp-vbar-track {
+  background: #eceaf5;
+}
+
+html:not([data-theme="dark"]) .rp-word-float {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--c) 25%, transparent);
+}
+
+/* Geri bildirim kartları — açık */
+html:not([data-theme="dark"]) .rp-feed-strip-item {
+  background: #fff;
+  border: 1px solid var(--border, #edeaf5);
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.05);
+}
+html:not([data-theme="dark"]) .rp-feed-strip-item:hover {
+  border-color: rgba(139, 124, 246, 0.4);
+}
+html:not([data-theme="dark"]) .rp-feed-avatar {
+  border-color: rgba(139, 124, 246, 0.15);
+}
+html:not([data-theme="dark"]) .rp-feed-text {
+  color: #4a4560;
+}
+html:not([data-theme="dark"]) .rp-feed-product {
+  color: #6b5fd4;
+}
+
+html:not([data-theme="dark"]) body.view-assistant #viewAssistant.as-bleed .reports-panel {
+  border-color: var(--border, #edeaf5) !important;
+}
+
+/* Toolbar — Geri / Platform (Raporlar) */
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReports:not(.hidden)) .as-back-btn,
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReports:not(.hidden)) .platform-select {
+  background: #fff;
+  border-color: var(--border, #edeaf5);
+  color: var(--ink, #2b2640);
+  box-shadow: 0 1px 4px rgba(43, 38, 64, 0.05);
+}
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReports:not(.hidden)) .as-bar-title {
+  color: var(--ink, #2b2640);
+}
+html:not([data-theme="dark"]) .as-workspace:has(#asSectionView:not(.hidden) #panelReports:not(.hidden)) .platform-label {
+  color: var(--muted, #7b7690);
+}

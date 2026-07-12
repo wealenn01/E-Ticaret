@@ -710,7 +710,7 @@
       #0c0a16;
   }
 
-  /* Finans — neon KPI kartları */
+  /* Finans — KPI kartları (varsayılan: aydınlık) */
   .fin-kpi-grid {
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 18px;
   }
@@ -726,8 +726,8 @@
   .fin-kpi {
     position: relative; isolation: isolate;
     border-radius: 14px; padding: 16px 18px; min-height: 92px;
-    background: linear-gradient(165deg, rgba(22, 18, 38, 0.96), rgba(18, 20, 34, 0.94));
-    border: 1px solid rgba(130, 115, 200, 0.2);
+    background: var(--card);
+    border: 1px solid var(--border);
     box-shadow: var(--shadow);
   }
   .fin-kpi .k-lbl {
@@ -739,21 +739,42 @@
     color: var(--ink);
   }
   .fin-kpi-pos {
+    border-color: rgba(13, 148, 136, 0.35);
+    box-shadow:
+      0 0 0 1px rgba(13, 148, 136, 0.12),
+      var(--shadow);
+  }
+  .fin-kpi-pos .k-lbl { color: #0f766e; }
+  .fin-kpi-neg {
+    border-color: rgba(225, 29, 72, 0.3);
+    box-shadow:
+      0 0 0 1px rgba(225, 29, 72, 0.1),
+      var(--shadow);
+  }
+  .fin-kpi-neg .k-lbl { color: #be123c; }
+
+  /* Finans — karanlık: neon KPI (aydınlık stillerini ezmez) */
+  html[data-theme="dark"] .fin-kpi {
+    background: linear-gradient(165deg, rgba(22, 18, 38, 0.96), rgba(18, 20, 34, 0.94));
+    border: 1px solid rgba(130, 115, 200, 0.2);
+    box-shadow: var(--shadow);
+  }
+  html[data-theme="dark"] .fin-kpi-pos {
     border-color: rgba(45, 212, 191, 0.45);
     box-shadow:
       0 0 0 1px rgba(45, 212, 191, 0.35),
       0 0 22px rgba(45, 212, 191, 0.22),
       inset 0 0 12px rgba(45, 212, 191, 0.06);
   }
-  .fin-kpi-pos .k-lbl { color: rgba(110, 231, 214, 0.85); }
-  .fin-kpi-neg {
+  html[data-theme="dark"] .fin-kpi-pos .k-lbl { color: rgba(110, 231, 214, 0.85); }
+  html[data-theme="dark"] .fin-kpi-neg {
     border-color: rgba(251, 113, 133, 0.55);
     box-shadow:
       0 0 0 1px rgba(251, 113, 133, 0.5),
       0 0 24px rgba(248, 113, 113, 0.28),
       inset 0 0 14px rgba(251, 113, 133, 0.08);
   }
-  .fin-kpi-neg .k-lbl { color: rgba(253, 164, 175, 0.9); }
+  html[data-theme="dark"] .fin-kpi-neg .k-lbl { color: rgba(253, 164, 175, 0.9); }
   html[data-theme="dark"] body:has(#viewFinance:not(.hidden)) {
     background:
       radial-gradient(ellipse 75% 45% at 20% -5%, rgba(45, 212, 191, 0.05), transparent 50%),
@@ -1456,10 +1477,10 @@
 
   @media (max-width: 640px) { .row, .row3, .attr { grid-template-columns: 1fr; } .card { padding: 18px; } }
 </style>
-<link rel="stylesheet" href="/static/assistant-reviews-ui.css?v=202607074600">
-<link rel="stylesheet" href="/static/assistant-consultant-ui.css?v=202607074400">
-<link rel="stylesheet" href="/static/assistant-ops-ui.css?v=202607074400">
-<link rel="stylesheet" href="/static/assistant-reports.css?v=202607074400">
+<link rel="stylesheet" href="/static/assistant-reviews-ui.css?v=202607121241">
+<link rel="stylesheet" href="/static/assistant-consultant-ui.css?v=202607121244">
+<link rel="stylesheet" href="/static/assistant-ops-ui.css?v=202607121250">
+<link rel="stylesheet" href="/static/assistant-reports.css?v=202607121248">
 </head>
 <body>
 
