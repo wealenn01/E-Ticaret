@@ -1478,7 +1478,7 @@
   @media (max-width: 640px) { .row, .row3, .attr { grid-template-columns: 1fr; } .card { padding: 18px; } }
 </style>
 <link rel="stylesheet" href="/static/assistant-reviews-ui.css?v=202607121241">
-<link rel="stylesheet" href="/static/assistant-consultant-ui.css?v=202607121244">
+<link rel="stylesheet" href="/static/assistant-consultant-ui.css?v=202607121800">
 <link rel="stylesheet" href="/static/assistant-ops-ui.css?v=202607121250">
 <link rel="stylesheet" href="/static/assistant-reports.css?v=202607121248">
 </head>
@@ -1664,6 +1664,23 @@
   <!-- İADE & TAZMİN -->
   <div id="viewClaims" class="hidden">
     <div class="demo-note hidden" id="clNote"></div>
+    <div class="card" id="clPolicyCard" style="margin-bottom:14px">
+      <h2 style="margin:0 0 8px;font-size:15px">İade politikası (AI)</h2>
+      <p class="hint" style="margin:0 0 10px">AI talepleri bu kurallara göre önerir; Trendyol’a yalnızca sizin onayınızdan sonra gider.</p>
+      <div class="filters" style="align-items:flex-end">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600">Max iade süresi (gün)
+          <input type="number" id="clMaxDays" min="1" max="365" value="30" style="width:100px">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;flex:1;min-width:220px">Politika metni
+          <input id="clRulesText" placeholder="Örn: 30 günden sonra iade kabul edilmez">
+        </label>
+        <button type="button" class="mini-btn grad" onclick="saveReturnPolicy()">Kaydet</button>
+      </div>
+    </div>
+    <div class="card" id="clAiBanner" style="display:none;margin-bottom:14px;border-color:rgba(139,124,246,.35)">
+      <strong id="clAiBannerTitle">AI incelemesi</strong>
+      <p class="hint" id="clAiBannerText" style="margin:6px 0 0"></p>
+    </div>
     <div class="card"><div style="overflow-x:auto"><table class="anl-table" id="clTable"></table></div></div>
   </div>
 
@@ -2049,7 +2066,7 @@ const VIEWS = {
   orders:    { el: 'viewOrders',    title: 'Siparişler',        sub: 'Tüm pazaryerlerinden gelen paketler', load: () => loadOrders() },
   products:  { el: 'viewProducts',  title: 'Ürünler & Stok',    sub: 'Fiyat ve stokları buradan anında güncelle', load: () => loadProducts() },
   questions: { el: 'viewQuestions', title: 'Müşteri Soruları',  sub: 'AI önerisiyle saniyeler içinde cevapla', load: () => loadQuestions() },
-  claims:    { el: 'viewClaims',    title: 'İade & Tazmin',     sub: 'Talepleri incele, onayla veya itiraz et', load: () => loadClaims() },
+  claims:    { el: 'viewClaims',    title: 'İade & Tazmin',     sub: 'AI önerir, siz onaylar veya düzenlersiniz — Trendyol’a sonra gider', load: () => loadClaims() },
   finance:   { el: 'viewFinance',   title: 'Finans',            sub: 'Hakediş, komisyon ve net kazanç', load: () => loadFinance() },
   listing:   { el: 'viewListing',   title: 'AI Ürün Ekleme',    sub: 'Fotoğraftan saniyeler içinde ilan hazırla', load: null },
   warehouse: { el: 'viewWarehouse', title: 'Depodaki Ürünlerim', sub: 'AI ile hazırladığın taslak ürünler', load: () => loadWarehouse() },
@@ -2602,40 +2619,169 @@ async function sendAnswer(idx, btn) {
 
 // ================= İADE & TAZMİN =================
 let CLAIMS = [];
+
+function fillReturnPolicyForm(policy) {
+  if (!policy) return;
+  const days = $('clMaxDays');
+  const rules = $('clRulesText');
+  if (days) days.value = policy.max_return_days || 30;
+  if (rules) rules.value = policy.rules_text || '';
+}
+
+async function saveReturnPolicy() {
+  try {
+    const r = await api('/api/mp/return-policy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        max_return_days: Number($('clMaxDays')?.value || 30),
+        rules_text: ($('clRulesText')?.value || '').trim(),
+      }),
+    });
+    fillReturnPolicyForm(r);
+    toast('İade politikası kaydedildi. Yeni talepler buna göre analiz edilecek.', 'ok');
+  } catch (e) { toast(e.message); }
+}
+
+function aiDecisionLabel(d) {
+  return d === 'reject' ? 'Reddet' : 'Onayla';
+}
+
+function renderClaimAiCell(c, idx) {
+  const ai = c.ai_review;
+  if (!ai) {
+    const canApprove = ['WaitingInAction', 'Created'].includes(c.status);
+    const canReject = c.status === 'WaitingInAction';
+    if (!(canApprove || canReject)) return '';
+    return '<div class="q-acts" style="margin:0">' +
+      (canApprove ? '<button class="mini-btn" onclick="reviewClaim(' + idx + ', true)">Onayla</button>' : '') +
+      (canReject ? '<button class="mini-btn danger" onclick="reviewClaim(' + idx + ', false)">İtiraz</button>' : '') +
+      '</div>';
+  }
+  const isReject = ai.proposed_decision === 'reject';
+  const tone = isReject ? '#c0355f' : '#0f766e';
+  return '<div class="cl-ai-box" style="min-width:240px;max-width:340px;padding:10px;border-radius:10px;border:1px solid rgba(139,124,246,.35);background:rgba(139,124,246,.08)">' +
+    '<div style="font-size:11px;font-weight:800;letter-spacing:.3px;margin-bottom:4px">🤖 AI önerisi: <span style="color:' + tone + '">' + aiDecisionLabel(ai.proposed_decision) + '</span></div>' +
+    '<div style="font-size:12px;line-height:1.4;margin-bottom:8px">' + esc(ai.reason) + '</div>' +
+    '<div class="q-acts" style="margin:0" id="clActs' + idx + '">' +
+      '<button class="mini-btn grad" onclick="confirmAiClaim(' + idx + ')">Onayla</button>' +
+      '<button class="mini-btn" onclick="toggleEditClaim(' + idx + ')">Düzenle</button>' +
+    '</div>' +
+    '<div class="hidden" id="clEdit' + idx + '" style="margin-top:8px">' +
+      '<div class="q-acts" style="margin:0 0 6px">' +
+        '<label style="font-size:12px"><input type="radio" name="clDec' + idx + '" value="approve"' + (!isReject ? ' checked' : '') + '> Kabul et</label>' +
+        '<label style="font-size:12px"><input type="radio" name="clDec' + idx + '" value="reject"' + (isReject ? ' checked' : '') + '> Reddet</label>' +
+      '</div>' +
+      '<textarea id="clReason' + idx + '" rows="2" style="width:100%;font-size:12px;border-radius:8px;padding:8px;resize:vertical" placeholder="Müşteriye / pazaryerine gidecek gerekçe">' + esc(ai.reason) + '</textarea>' +
+      '<div class="q-acts" style="margin:6px 0 0">' +
+        '<button class="mini-btn grad" onclick="submitEditedClaim(' + idx + ')">Trendyol’a gönder</button>' +
+        '<button class="mini-btn" onclick="toggleEditClaim(' + idx + ')">Vazgeç</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
 async function loadClaims() {
   try {
     const d = await api('/api/mp/claims');
     demoNote('clNote', d.platforms);
-    CLAIMS = d.rows;
-    const canApprove = s => ['WaitingInAction', 'Created'].includes(s);
-    const canReject = s => s === 'WaitingInAction';
-    $('clTable').innerHTML = '<tr><th>Talep</th><th>Ürün</th><th>Neden</th><th>Tip</th><th>Platform</th><th>Tarih</th><th>Durum</th><th></th></tr>' +
+    CLAIMS = d.rows || [];
+    fillReturnPolicyForm(d.return_policy);
+
+    const banner = $('clAiBanner');
+    const newN = (d.ai_new || []).length;
+    const pendingN = d.ai_pending || 0;
+    if (banner) {
+      if (newN > 0) {
+        banner.style.display = '';
+        $('clAiBannerTitle').textContent = 'AI ' + newN + ' iade talebini inceledi';
+        $('clAiBannerText').textContent = 'Öneriler aşağıda. Trendyol’a gitmez — Onayla veya Düzenle demeniz gerekir.';
+        toast('AI ' + newN + ' iade işlemini inceledi; onayınızı bekliyor.', 'ok');
+      } else if (pendingN > 0) {
+        banner.style.display = '';
+        $('clAiBannerTitle').textContent = pendingN + ' AI önerisi onayınızı bekliyor';
+        $('clAiBannerText').textContent = 'Onaylarsanız karar pazaryerine iletilir; Düzenle ile kabul/red ve gerekçeyi değiştirebilirsiniz.';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    const clBadge = $('clCount');
+    if (clBadge) {
+      const openN = CLAIMS.filter(c => ['WaitingInAction', 'Created', 'Open'].includes(c.status)).length;
+      clBadge.style.display = openN ? '' : 'none';
+      clBadge.textContent = openN;
+    }
+
+    $('clTable').innerHTML = '<tr><th>Talep</th><th>Ürün</th><th>Neden</th><th>Tip</th><th>Platform</th><th>Tarih</th><th>Durum</th><th>AI / İşlem</th></tr>' +
       (CLAIMS.length ? CLAIMS.map((c, idx) =>
-        '<tr><td><strong>' + esc(c.claim_id) + '</strong><br><span class="hint" style="font-size:11px">' + esc(c.order_id) + '</span></td>' +
+        '<tr><td><strong>' + esc(c.claim_id) + '</strong><br><span class="hint" style="font-size:11px">' + esc(c.order_id) +
+        (c.order_date ? '<br>Sipariş: ' + esc(c.order_date) : '') + '</span></td>' +
         '<td>' + esc(c.product) + '</td><td>' + esc(c.reason) + '</td>' +
         '<td>' + (c.type === 'compensation' ? '💼 Tazmin' : '↩️ İade') + '</td>' +
         '<td>' + platTag(c.platform) + '</td><td>' + esc(c.date) + '</td>' +
-        '<td>' + (canApprove(c.status) || canReject(c.status) ? '<span class="pillst st-Picking">Bekliyor</span>' : (c.status === 'Accepted' ? '<span class="pillst st-Delivered" title="Onaylanan iadeye itiraz edilemez">Onaylandı</span>' : '<span class="pillst st-Cancelled">' + esc(c.status) + '</span>')) + '</td>' +
-        '<td>' + (canApprove(c.status) || canReject(c.status)
-          ? '<div class="q-acts" style="margin:0">' +
-            (canApprove(c.status) ? '<button class="mini-btn" onclick="reviewClaim(' + idx + ', true)">Onayla</button>' : '') +
-            (canReject(c.status) ? '<button class="mini-btn danger" onclick="reviewClaim(' + idx + ', false)">İtiraz</button>' : '') +
-            '</div>' : '') + '</td></tr>').join('')
+        '<td>' + (['WaitingInAction', 'Created', 'Open'].includes(c.status)
+          ? '<span class="pillst st-Picking">Bekliyor</span>'
+          : (c.status === 'Accepted'
+            ? '<span class="pillst st-Delivered" title="Onaylanan iadeye itiraz edilemez">Onaylandı</span>'
+            : '<span class="pillst st-Cancelled">' + esc(c.status) + '</span>')) + '</td>' +
+        '<td>' + renderClaimAiCell(c, idx) + '</td></tr>').join('')
         : '<tr><td colspan="8" class="hint">İade talebi yok.</td></tr>');
   } catch (e) { toast(e.message); }
 }
 
-async function reviewClaim(idx, approve) {
+function toggleEditClaim(idx) {
+  const box = $('clEdit' + idx);
+  if (!box) return;
+  box.classList.toggle('hidden');
+}
+
+async function confirmAiClaim(idx) {
   const c = CLAIMS[idx];
+  const ai = c && c.ai_review;
+  if (!ai) return;
+  const approve = ai.proposed_decision !== 'reject';
+  if (!confirm(approve
+    ? 'AI kabul öneriyor. Onaylarsanız karar Trendyol’a gönderilir.'
+    : 'AI reddetmeyi öneriyor:\n\n' + (ai.reason || '') + '\n\nOnaylarsanız red Trendyol’a gönderilir.')) return;
+  await sendClaimDecision(idx, approve, ai.reason || '', true, ai.id);
+}
+
+async function submitEditedClaim(idx) {
+  const dec = document.querySelector('input[name="clDec' + idx + '"]:checked');
+  const reason = ($('clReason' + idx)?.value || '').trim();
+  const approve = !dec || dec.value === 'approve';
+  if (!approve && reason.length < 5) {
+    toast('Red için en az 5 karakterlik gerekçe yazın.');
+    return;
+  }
+  await sendClaimDecision(idx, approve, reason, false, CLAIMS[idx]?.ai_review?.id);
+}
+
+async function reviewClaim(idx, approve) {
   const reason = approve ? '' : (prompt('İtiraz gerekçesi:') || '');
   if (!approve && !reason) return;
+  await sendClaimDecision(idx, approve, reason, false, null);
+}
+
+async function sendClaimDecision(idx, approve, reason, fromAi, aiReviewId) {
+  const c = CLAIMS[idx];
+  if (!c) return;
   try {
-    const r = await api('/api/mp/claims/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: c.platform, claim_id: c.claim_id, approve, reason,
-        claim_item_ids: c.claim_item_ids || [] }) });
-    toast(r.message, 'ok');
-    c.status = approve ? 'Accepted' : 'Rejected';
-    loadClaims(); loadOverview();
+    const r = await api('/api/mp/claims/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform: c.platform,
+        claim_id: c.claim_id,
+        approve,
+        reason: reason || '',
+        claim_item_ids: c.claim_item_ids || [],
+        from_ai: !!fromAi,
+        ai_review_id: aiReviewId || null,
+      }),
+    });
+    toast(r.message || (approve ? 'İade onaylandı.' : 'İade reddedildi.'), 'ok');
+    loadClaims();
+    loadOverview();
   } catch (e) { toast(e.message); }
 }
 
@@ -3272,7 +3418,7 @@ switchView('overview');
 </script>
 <script src="/static/assistant-insight.js?v=202607073400"></script>
 <script src="/static/assistant-reports.js?v=202607072500"></script>
-<script src="/static/assistant.js?v=202607074600"></script>
+<script src="/static/assistant.js?v=202607121800"></script>
 <script>
 initAssistantEvents();
 </script>

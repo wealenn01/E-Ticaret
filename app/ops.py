@@ -346,11 +346,282 @@ def answer(req: AnswerRequest, request: Request):
 
 # ---- iadeler & tazmin ----
 
+DEFAULT_RETURN_POLICY = {
+    "max_return_days": 30,
+    "rules_text": (
+        "İade süresi sipariş/teslimat tarihinden itibaren en fazla 30 gündür. "
+        "Süre aşımında iade reddedilir. Yanlış ürün, hasarlı ürün veya eksik ürün "
+        "talepleri süre içindeyken kabul edilebilir. Tazmin talepleri ayrı değerlendirilir."
+    ),
+}
+
+CLAIM_AI_SYSTEM = """Sen Türkçe konuşan bir e-ticaret iade politikası uzmanısın.
+Satıcının iade politikasına göre müşteri iade/tazmin talebini değerlendir.
+Kurallar:
+- Politikaya aykırıysa decision="reject", uygunsa decision="approve".
+- reason: satıcıya ve müşteriye gösterilecek kısa, net Türkçe gerekçe (1-2 cümle).
+- rationale: satıcıya özel kısa açıklama (neden bu karar).
+- confidence: 0 ile 1 arası sayı.
+Şu JSON formatında yanıt ver:
+{"decision":"approve"|"reject","reason":"...","rationale":"...","confidence":0.0}"""
+
+
+def _return_policy_from_settings() -> dict:
+    s = load_ops_settings()
+    days = int(s.get("max_return_days", DEFAULT_RETURN_POLICY["max_return_days"]))
+    rules = (s.get("return_rules_text") or DEFAULT_RETURN_POLICY["rules_text"]).strip()
+    return {
+        "max_return_days": max(1, min(365, days)),
+        "rules_text": rules or DEFAULT_RETURN_POLICY["rules_text"],
+    }
+
+
+def _claim_reviews_file():
+    return ai_seller._data_dir() / "claim_ai_reviews.json"
+
+
+def _load_claim_reviews() -> list[dict]:
+    f = _claim_reviews_file()
+    if not f.exists():
+        return []
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_claim_reviews(items: list[dict]) -> None:
+    _claim_reviews_file().write_text(
+        json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+
+
+def _parse_claim_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    for cand in (text[:16], text[:10], text):
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(cand, fmt)
+            except ValueError:
+                continue
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _claim_age_days(claim: dict) -> int | None:
+    """Sipariş/teslimattan iade talebine kadar geçen gün. Yoksa None."""
+    claim_dt = _parse_claim_dt(claim.get("date")) or datetime.now()
+    order_dt = _parse_claim_dt(claim.get("order_date") or claim.get("delivery_date"))
+    if not order_dt:
+        return None
+    return max(0, (claim_dt.date() - order_dt.date()).days)
+
+
+def _rule_based_claim_decision(claim: dict, policy: dict) -> dict | None:
+    """Sert politika kuralları — AI yokken veya AI öncesi zorunlu red."""
+    days = _claim_age_days(claim)
+    max_days = policy["max_return_days"]
+    if days is not None and days > max_days:
+        return {
+            "decision": "reject",
+            "reason": (
+                f"Bu iade talebi sipariş/teslimattan {days} gün sonra geldi. "
+                f"İade politikamız en fazla {max_days} gündür; süre aşıldığı için iade kabul edilemez."
+            ),
+            "rationale": f"Süre aşımı kuralı: {days} > {max_days} gün.",
+            "confidence": 0.98,
+            "source": "policy_rule",
+        }
+    return None
+
+
+def _ai_claim_decision(claim: dict, policy: dict) -> dict:
+    forced = _rule_based_claim_decision(claim, policy)
+    if forced and not ai_seller.ai_available():
+        return forced
+    if not ai_seller.ai_available():
+        # Süre içinde / tarih yok → satıcı onayı için kabul öner
+        return {
+            "decision": "approve",
+            "reason": (
+                "Talep iade süresi içinde görünüyor veya sipariş tarihi net değil; "
+                "politika açısından kabul önerilir. Lütfen kontrol edip onaylayın."
+            ),
+            "rationale": "AI anahtarı yok; varsayılan süre-içi kabul önerisi.",
+            "confidence": 0.55,
+            "source": "policy_fallback",
+        }
+    payload = {
+        "politika": policy,
+        "talep": {
+            "claim_id": claim.get("claim_id"),
+            "ürün": claim.get("product"),
+            "müşteri_nedeni": claim.get("reason"),
+            "tip": claim.get("type"),
+            "iade_talep_tarihi": claim.get("date"),
+            "sipariş_tarihi": claim.get("order_date") or claim.get("delivery_date") or "",
+            "geçen_gün": _claim_age_days(claim),
+            "durum": claim.get("status"),
+        },
+    }
+    try:
+        result = ai_seller._chat_json(
+            CLAIM_AI_SYSTEM, json.dumps(payload, ensure_ascii=False)
+        )
+        decision = str(result.get("decision", "")).strip().lower()
+        if decision not in ("approve", "reject"):
+            decision = "reject" if forced else "approve"
+        out = {
+            "decision": decision,
+            "reason": str(result.get("reason") or "").strip()
+            or (forced["reason"] if forced else "Politika değerlendirmesi tamamlandı."),
+            "rationale": str(result.get("rationale") or "").strip(),
+            "confidence": float(result.get("confidence") or 0.7),
+            "source": "ai",
+        }
+        # Sert kural AI'yı ezer (süre aşımı asla onay önerilmez)
+        if forced and forced["decision"] == "reject":
+            out["decision"] = "reject"
+            out["reason"] = forced["reason"]
+            out["rationale"] = forced["rationale"] + " (AI önerisi politika kuralıyla düzeltildi.)"
+            out["source"] = "policy_rule+ai"
+            out["confidence"] = max(out["confidence"], 0.95)
+        return out
+    except Exception:
+        return forced or {
+            "decision": "approve",
+            "reason": "AI değerlendirmesi yapılamadı; süreyi kontrol edip manuel karar verin.",
+            "rationale": "AI hatası — varsayılan kabul önerisi.",
+            "confidence": 0.4,
+            "source": "error_fallback",
+        }
+
+
+def _review_key(platform: str, claim_id: str) -> str:
+    return f"{platform}:{claim_id}"
+
+
+def _pending_reviews_map() -> dict[str, dict]:
+    return {
+        _review_key(r["platform"], r["claim_id"]): r
+        for r in _load_claim_reviews()
+        if r.get("status") == "pending_seller"
+    }
+
+
+def _ensure_ai_reviews_for_claims(rows: list[dict]) -> list[dict]:
+    """Bekleyen iadeler için AI önerisi üret (Trendyol'a GÖNDERMEZ)."""
+    policy = _return_policy_from_settings()
+    reviews = _load_claim_reviews()
+    already = {
+        _review_key(r["platform"], r["claim_id"])
+        for r in reviews
+        if r.get("status") in ("pending_seller", "confirmed", "edited")
+    }
+    actionable = {"WaitingInAction", "Created", "Open"}
+    new_ones: list[dict] = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    for claim in rows:
+        if claim.get("status") not in actionable:
+            continue
+        key = _review_key(claim.get("platform", ""), claim.get("claim_id", ""))
+        if key in already:
+            continue
+        decision = _ai_claim_decision(claim, policy)
+        item = {
+            "id": f"cair-{int(time.time() * 1000)}-{claim.get('claim_id', '')}",
+            "platform": claim.get("platform", ""),
+            "claim_id": claim.get("claim_id", ""),
+            "order_id": claim.get("order_id", ""),
+            "product": claim.get("product", ""),
+            "customer_reason": claim.get("reason", ""),
+            "proposed_decision": decision["decision"],
+            "reason": decision["reason"],
+            "rationale": decision.get("rationale", ""),
+            "confidence": decision.get("confidence", 0.7),
+            "source": decision.get("source", "ai"),
+            "status": "pending_seller",
+            "created_at": now,
+            "claim_item_ids": claim.get("claim_item_ids") or [],
+            "order_date": claim.get("order_date") or "",
+            "claim_date": claim.get("date") or "",
+        }
+        reviews.append(item)
+        already.add(key)
+        new_ones.append(item)
+
+    if new_ones:
+        _save_claim_reviews(reviews)
+    return new_ones
+
+
+def _attach_ai_reviews(rows: list[dict]) -> None:
+    pending = _pending_reviews_map()
+    for claim in rows:
+        key = _review_key(claim.get("platform", ""), claim.get("claim_id", ""))
+        rev = pending.get(key)
+        if rev:
+            claim["ai_review"] = {
+                "id": rev["id"],
+                "proposed_decision": rev["proposed_decision"],
+                "reason": rev["reason"],
+                "rationale": rev.get("rationale", ""),
+                "confidence": rev.get("confidence", 0),
+                "source": rev.get("source", ""),
+                "status": rev["status"],
+                "created_at": rev.get("created_at", ""),
+            }
+
+
+@router.get("/return-policy")
+def get_return_policy(request: Request):
+    _user(request)
+    return _return_policy_from_settings()
+
+
+class ReturnPolicyRequest(BaseModel):
+    max_return_days: int = 30
+    rules_text: str = ""
+
+
+@router.post("/return-policy")
+def save_return_policy(req: ReturnPolicyRequest, request: Request):
+    _user(request)
+    data = load_ops_settings()
+    data["max_return_days"] = max(1, min(365, int(req.max_return_days)))
+    text = (req.rules_text or "").strip()
+    data["return_rules_text"] = text or DEFAULT_RETURN_POLICY["rules_text"]
+    _ops_settings_file().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return _return_policy_from_settings()
+
+
 @router.get("/claims")
-def claims(request: Request, platform: Optional[str] = None):
+def claims(request: Request, platform: Optional[str] = None, analyze: bool = True):
     uid = _user(request)["id"]
     result = _collect(uid, _clients(request, platform), "list_claims")
     result["rows"].sort(key=lambda c: c.get("date", ""), reverse=True)
+    new_reviews: list[dict] = []
+    if analyze:
+        new_reviews = _ensure_ai_reviews_for_claims(result["rows"])
+    _attach_ai_reviews(result["rows"])
+    pending_n = sum(1 for r in result["rows"] if r.get("ai_review"))
+    result["ai_pending"] = pending_n
+    result["ai_new"] = [
+        {
+            "claim_id": n["claim_id"],
+            "product": n["product"],
+            "proposed_decision": n["proposed_decision"],
+            "reason": n["reason"],
+        }
+        for n in new_reviews
+    ]
+    result["return_policy"] = _return_policy_from_settings()
     return result
 
 
@@ -360,6 +631,28 @@ class ClaimReviewRequest(BaseModel):
     approve: bool
     reason: str = ""
     claim_item_ids: Optional[list[str]] = None
+    ai_review_id: Optional[str] = None
+    from_ai: bool = False
+
+
+def _mark_ai_review_done(ai_review_id: str | None, claim_id: str, platform: str,
+                         final_decision: str, mode: str) -> None:
+    reviews = _load_claim_reviews()
+    changed = False
+    for r in reviews:
+        match = (
+            (ai_review_id and r.get("id") == ai_review_id)
+            or (r.get("claim_id") == claim_id and r.get("platform") == platform
+                and r.get("status") == "pending_seller")
+        )
+        if match:
+            r["status"] = "confirmed" if mode == "confirm" else "edited"
+            r["final_decision"] = final_decision
+            r["resolved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            changed = True
+            break
+    if changed:
+        _save_claim_reviews(reviews)
 
 
 @router.post("/claims/review")
@@ -371,6 +664,13 @@ def review_claim(req: ClaimReviewRequest, request: Request):
             req.claim_id, req.approve, req.reason, claim_item_ids=req.claim_item_ids
         )
         invalidate_mp_cache(uid, req.platform, "list_claims")
+        _mark_ai_review_done(
+            req.ai_review_id,
+            req.claim_id,
+            req.platform,
+            "approve" if req.approve else "reject",
+            "confirm" if req.from_ai else "edited",
+        )
         return result
     except NotSupported as e:
         raise HTTPException(400, str(e))
@@ -378,6 +678,14 @@ def review_claim(req: ClaimReviewRequest, request: Request):
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(400, f"İade işlemi tamamlanamadı: {str(e)[:200]}")
+
+
+@router.get("/claims/ai-pending")
+def claims_ai_pending(request: Request):
+    _user(request)
+    pending = [r for r in _load_claim_reviews() if r.get("status") == "pending_seller"]
+    pending.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    return {"rows": pending, "count": len(pending)}
 
 
 # ---- finans ----

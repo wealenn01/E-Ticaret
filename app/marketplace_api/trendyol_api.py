@@ -225,17 +225,29 @@ class TrendyolAPI(B.MarketplaceClient):
             statuses = [(ci.get("claimItemStatus") or {}).get("name", "") for ci in all_ci]
             status = self._aggregate_claim_status(statuses)
             claim_item_ids = [str(ci.get("id")) for ci in all_ci]
-            rows.append({
+            claim_ms = cl.get("claimDate") or 0
+            order_ms = (
+                cl.get("orderDate")
+                or first_line.get("orderDate")
+                or first_ci.get("orderDate")
+                or 0
+            )
+            row = {
                 "claim_id": str(cl.get("id") or cl.get("claimId") or ""),
                 "order_id": str(cl.get("orderNumber", "")),
                 "product": first_line.get("productName", ""),
                 "sku": first_line.get("merchantSku", ""),
                 "reason": reason,
                 "type": "return",
-                "date": time.strftime("%Y-%m-%d %H:%M", time.localtime((cl.get("claimDate") or 0) / 1000)),
+                "date": time.strftime("%Y-%m-%d %H:%M", time.localtime(claim_ms / 1000)) if claim_ms else "",
                 "status": status,
                 "claim_item_ids": claim_item_ids,
-            })
+            }
+            if order_ms:
+                row["order_date"] = time.strftime(
+                    "%Y-%m-%d %H:%M", time.localtime(order_ms / 1000)
+                )
+            rows.append(row)
         return self._tag(rows)
 
     def review_claim(self, claim_id: str, approve: bool, reason: str = "",

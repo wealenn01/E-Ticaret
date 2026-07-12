@@ -1648,6 +1648,52 @@ PRODUCT_PRESET_GROUPS: list[dict] = [
             {"id": "cargo-reduce-advice", "label": "Kargo için ne yapmalıyım?", "question": "Kargo şikayetlerini azaltmak için ne önerirsin?"},
         ],
     },
+    {
+        "id": "general", "title": "Genel",
+        "description": "Yorum + iade + kargo birleşik aksiyon planı",
+        "questions": [
+            {
+                "id": "general-what-to-do",
+                "label": "Bu ürün için ne yapmalıyım?",
+                "question": (
+                    "Bu ürünün yorum, iade ve kargo verilerini birlikte analiz et. "
+                    "Öncelikli sorunları netleştir ve somut olarak ne yapmam gerektiğini maddeler halinde söyle."
+                ),
+            },
+            {
+                "id": "general-health-card",
+                "label": "Ürün sağlık karnesi",
+                "question": (
+                    "Bu ürün için yorum duygu dağılımı, iade durumu ve kargo şikayetlerini tek bir sağlık karnesinde özetle. "
+                    "Her alanı iyi/orta/kötü olarak işaretle ve gerekçesini yaz."
+                ),
+            },
+            {
+                "id": "general-top-risk",
+                "label": "En kritik risk hangisi?",
+                "question": (
+                    "Bu üründe yorum, iade ve kargo verilerine bakarak en kritik riski belirle. "
+                    "Neden kritik olduğunu kanıtla ve ilk 3 acil aksiyonu öner."
+                ),
+            },
+            {
+                "id": "general-priority-actions",
+                "label": "Öncelikli aksiyon listesi",
+                "question": (
+                    "Bu ürün için yorum + iade + kargo verilerini birleştirip öncelikli aksiyon listesi çıkar. "
+                    "Her aksiyonun hangi veriye dayandığını ve beklenen etkisini yaz."
+                ),
+            },
+            {
+                "id": "general-fix-plan",
+                "label": "7 günlük iyileştirme planı",
+                "question": (
+                    "Bu ürünün yorum, iade ve kargo sorunlarını dikkate alarak 7 günlük iyileştirme planı yaz. "
+                    "Gün gün ne yapacağımı net ve uygulanabilir şekilde anlat."
+                ),
+            },
+        ],
+    },
 ]
 
 STORE_PRESET_GROUPS: list[dict] = [
@@ -1696,6 +1742,9 @@ STORE_PRESET_GROUPS: list[dict] = [
 def _tailor_preset_question(question: str, product_name: str) -> str:
     return (
         question
+        .replace("Bu ürünün", f"{product_name} ürününün")
+        .replace("Bu ürün için", f"{product_name} için")
+        .replace("Bu üründe", f"{product_name} ürününde")
         .replace("Mağazamın", f"{product_name} ürününün")
         .replace("Yorumlarıma", f"{product_name} yorumlarına")
         .replace("Yorumlarımda", f"{product_name} yorumlarında")

@@ -846,8 +846,9 @@
     const title = (g.title || "").toLowerCase();
     if (id === "returns" || title.includes("iade")) return "tone-teal";
     if (id === "cargo" || title.includes("kargo")) return "tone-amber";
-    if (id === "compare" || id === "reviews" || title.includes("mağaza") || title.includes("karşılaştır")) return "tone-violet";
-    return ["tone-violet", "tone-teal", "tone-amber"][i % 3];
+    if (id === "general" || title.includes("genel")) return "tone-rose";
+    if (id === "compare" || id === "reviews" || title.includes("yorum") || title.includes("mağaza") || title.includes("karşılaştır")) return "tone-violet";
+    return ["tone-violet", "tone-teal", "tone-amber", "tone-rose"][i % 4];
   }
 
   async function loadPresets() {
@@ -869,6 +870,7 @@
           { title: "Kargo", questions: (groups.find(g => g.id === "cargo") || { questions: [] }).questions },
         ].filter(g => g.questions.length);
     if (!$("presetGroups")) return;
+    $("presetGroups").classList.toggle("preset-groups-4", !!selected && display.length >= 4);
     $("presetGroups").innerHTML = display.map((g, i) => `
       <section class="preset-group ${presetTone(g, i)}">
         <h4>${esc(g.title)}</h4>

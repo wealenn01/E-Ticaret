@@ -159,6 +159,8 @@ def demo_claims(prefix: str) -> list[dict]:
         p = _DEMO_PRODUCTS[(i + 1) % len(_DEMO_PRODUCTS)]
         cid = f"CLM-{prefix}{4400 + i}"
         item_id = f"CI-{prefix}{4400 + i}"
+        # İlk talep: sipariş ~45 gün önce — iade süresi aşımı senaryosu
+        order_days_ago = 45 if i == 0 else (i + 3)
         claims.append({
             "claim_id": cid,
             "order_id": f"{prefix}{70200 + i * 7}",
@@ -167,6 +169,7 @@ def demo_claims(prefix: str) -> list[dict]:
             "reason": reason,
             "type": ctype,
             "date": _demo_date(i + 1),
+            "order_date": _demo_date(order_days_ago),
             "status": "WaitingInAction" if i < 3 else ("Created" if i == 3 else "Accepted"),
             "claim_item_ids": [item_id],
         })
