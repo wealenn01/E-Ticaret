@@ -95,10 +95,17 @@ def _ops_settings_file():
 
 def load_ops_settings() -> dict:
     f = _ops_settings_file()
-    default = {"low_stock_threshold": 5}
+    default = {"low_stock_threshold": 5, "active_platform": None}
     if f.exists():
         return {**default, **json.loads(f.read_text(encoding="utf-8"))}
     return default
+
+
+def save_ops_settings(patch: dict) -> dict:
+    data = load_ops_settings()
+    data.update(patch)
+    _ops_settings_file().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return data
 
 
 @router.get("/settings")
@@ -108,23 +115,33 @@ def get_settings(request: Request):
 
 
 class OpsSettingsRequest(BaseModel):
-    low_stock_threshold: int = 5
+    low_stock_threshold: Optional[int] = None
+    active_platform: Optional[str] = None
 
 
 @router.post("/settings")
 def save_settings(req: OpsSettingsRequest, request: Request):
     _user(request)
-    data = {"low_stock_threshold": max(0, req.low_stock_threshold)}
-    _ops_settings_file().write_text(json.dumps(data), encoding="utf-8")
-    return data
+    patch: dict = {}
+    if req.low_stock_threshold is not None:
+        patch["low_stock_threshold"] = max(0, req.low_stock_threshold)
+    if req.active_platform is not None:
+        plat = req.active_platform.strip().lower() if req.active_platform else ""
+        if plat and plat not in ("trendyol", "hepsiburada", "n11", "amazon"):
+            raise HTTPException(400, "Geçersiz platform.")
+        if plat:
+            if not _clients(request, plat):
+                raise HTTPException(404, f"'{plat}' bağlantısı bulunamadı.")
+        patch["active_platform"] = plat or None
+    return save_ops_settings(patch)
 
 
 # ---- genel bakış (dashboard) ----
 
 @router.get("/overview")
-def overview(request: Request):
+def overview(request: Request, platform: Optional[str] = None):
     uid = _user(request)["id"]
-    clients = _clients(request)
+    clients = _clients(request, platform)
     days_window = 30
     with ThreadPoolExecutor(max_workers=4) as ex:
         f_orders = ex.submit(_collect, uid, clients, "list_orders", days=days_window)
@@ -691,11 +708,11 @@ def claims_ai_pending(request: Request):
 # ---- finans ----
 
 @router.get("/finance")
-def finance(request: Request, days: int = 30):
+def finance(request: Request, days: int = 30, platform: Optional[str] = None):
     from . import billing
 
     billing.check_feature(_user(request)["id"], "finance")
-    clients = _clients(request)
+    clients = _clients(request, platform)
     out, notes = [], []
     for c in clients:
         try:
@@ -741,13 +758,15 @@ def _save_tracked(items: list[dict]) -> None:
 
 
 @router.get("/buybox")
-def buybox(request: Request):
+def buybox(request: Request, platform: Optional[str] = None):
     from . import billing
 
     user = _user(request)
     billing.check_feature(user["id"], "buybox")
-    clients = {c.platform: c for c in _clients(request)}
+    clients = {c.platform: c for c in _clients(request, platform)}
     tracked = _load_tracked()
+    if platform:
+        tracked = [t for t in tracked if t.get("platform") == platform]
     rows, notes = [], []
     for t in tracked:
         client = clients.get(t["platform"])

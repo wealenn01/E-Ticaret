@@ -407,48 +407,63 @@
   .stp-drawer:hover { background: #241e3a; filter: none; }
   html:not([data-theme="dark"]) .stp-drawer:hover { filter: brightness(0.97); }
 
-  /* fiyatlar */
-  .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; align-items: stretch; }
+  /* fiyatlar — CLI kart glow (doygun mor→cyan, sıkı mesafe, sadece DIŞ) */
+  .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; align-items: stretch; overflow: visible; padding: 14px 6px; }
+  .plan-wrap {
+    position: relative;
+    transition: transform .28s cubic-bezier(.34,1.56,.64,1);
+  }
+  .plan-wrap:hover { transform: translateY(-4px); }
+  .plan-aura {
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: conic-gradient(
+      from 200deg at 50% 50%,
+      #f0abfc 0deg,
+      #e879f9 35deg,
+      #d946ef 70deg,
+      #a855f7 110deg,
+      #6366f1 150deg,
+      #3b82f6 190deg,
+      #22d3ee 240deg,
+      #38bdf8 290deg,
+      #c084fc 330deg,
+      #f0abfc 360deg
+    );
+    filter: blur(16px);
+    transform: scale(1.055);
+    transition: opacity .28s ease;
+  }
+  .plan-wrap:hover .plan-aura { opacity: 1; }
   .plan {
-    border-radius: 20px; padding: 30px 24px;
-    display: flex; flex-direction: column;
-    border: 1.5px solid transparent;
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(var(--border), var(--border)) border-box;
+    position: relative;
+    z-index: 1;
+    border-radius: 24px; padding: 30px 24px;
+    display: flex; flex-direction: column; height: 100%;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    background-color: #f3f4f8;
+    background-image: none;
     box-shadow: var(--shadow);
-    transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s, background .25s;
+    transition: border-color .28s ease, box-shadow .28s ease;
   }
-  .plan:hover {
-    transform: translateY(-6px) scale(1.02);
-    box-shadow: 0 12px 40px rgba(139, 124, 246, 0.18);
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(135deg, #a78bfa, #2dd4bf 50%, #f9b17c) border-box;
+  .plan-wrap:hover .plan {
+    border-color: transparent;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
   }
-  .plans .plan:nth-child(1):hover {
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(135deg, #a78bfa, #5eead4) border-box;
-  }
-  .plans .plan:nth-child(2):hover {
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(135deg, #7dd3fc, #c4b5fd) border-box;
-  }
-  .plans .plan:nth-child(3):hover,
   .plan.hot {
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(135deg, #a78bfa, #2dd4bf) border-box;
+    overflow: visible;
+    border: 1.5px solid transparent;
+    background-color: #f3f4f8;
+    background-image:
+      linear-gradient(#f3f4f8, #f3f4f8),
+      linear-gradient(135deg, #a78bfa, #2dd4bf);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
   }
-  .plans .plan:nth-child(4):hover {
-    background:
-      linear-gradient(var(--card), var(--card)) padding-box,
-      linear-gradient(135deg, #fcd34d, #fb7185) border-box;
-  }
-  .plan.hot { position: relative; }
-  .plan.hot:hover { box-shadow: 0 12px 40px rgba(139, 124, 246, 0.28); }
   .plan.hot::before {
     content: "En popüler"; position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
     background: linear-gradient(135deg, var(--lilac), #a58ef8); color: #fff;
@@ -464,34 +479,53 @@
   .plan .btn.ghost {
     border: 1.5px solid transparent;
     background:
-      linear-gradient(var(--card), var(--card)) padding-box,
+      linear-gradient(#f3f4f8, #f3f4f8) padding-box,
       linear-gradient(135deg, #a78bfa, #2dd4bf) border-box;
     color: var(--ink);
   }
-  .plans .plan:nth-child(1) .btn.ghost {
+  .plans .plan-wrap:nth-child(1) .btn.ghost {
     background:
-      linear-gradient(var(--card), var(--card)) padding-box,
+      linear-gradient(#f3f4f8, #f3f4f8) padding-box,
       linear-gradient(135deg, #a78bfa, #5eead4) border-box;
   }
-  .plans .plan:nth-child(2) .btn.ghost {
+  .plans .plan-wrap:nth-child(2) .btn.ghost {
     background:
-      linear-gradient(var(--card), var(--card)) padding-box,
+      linear-gradient(#f3f4f8, #f3f4f8) padding-box,
       linear-gradient(135deg, #7dd3fc, #c4b5fd) border-box;
   }
-  .plans .plan:nth-child(4) .btn.ghost {
+  .plans .plan-wrap:nth-child(4) .btn.ghost {
     background:
-      linear-gradient(var(--card), var(--card)) padding-box,
+      linear-gradient(#f3f4f8, #f3f4f8) padding-box,
       linear-gradient(135deg, #fcd34d, #fb7185) border-box;
   }
   .plan .btn.ghost:hover {
     box-shadow: 0 0 18px rgba(139, 124, 246, 0.25);
     filter: brightness(1.06);
   }
+  html[data-theme="dark"] .plan {
+    background-color: var(--card);
+    border-color: rgba(255,255,255,0.08);
+  }
+  html[data-theme="dark"] .plan.hot {
+    background-color: var(--card);
+    background-image:
+      linear-gradient(var(--card), var(--card)),
+      linear-gradient(135deg, #a78bfa, #2dd4bf);
+  }
+  html[data-theme="dark"] .plan .btn.ghost,
+  html[data-theme="dark"] .plans .plan-wrap:nth-child(1) .btn.ghost,
+  html[data-theme="dark"] .plans .plan-wrap:nth-child(2) .btn.ghost,
+  html[data-theme="dark"] .plans .plan-wrap:nth-child(4) .btn.ghost {
+    background:
+      linear-gradient(var(--card), var(--card)) padding-box,
+      linear-gradient(135deg, #a78bfa, #2dd4bf) border-box;
+  }
   html[data-theme="dark"] .plan h3 { color: #f8f6ff; }
   html[data-theme="dark"] .plan .price { color: #ffffff; }
   html[data-theme="dark"] .plan .per { color: #d2cce6; }
   html[data-theme="dark"] .plan li { color: #e2dcf4; }
   html[data-theme="dark"] .plan li::before { color: #c4b5fd; }
+  html[data-theme="dark"] .plan-wrap:hover .plan-aura { opacity: 0.8; }
   html:not([data-theme="dark"]) .plan .per { color: #5a5470; }
   html:not([data-theme="dark"]) .plan li { color: #3d3854; }
 
@@ -767,57 +801,69 @@
       <p>Dilediğiniz an yükseltin, düşürün veya iptal edin — taahhüt yok.</p>
     </div>
     <div class="plans" id="planGrid">
-      <div class="plan reveal">
-        <h3>Ücretsiz</h3>
-        <div class="price">₺0</div>
-        <div class="per">denemek için — kart gerekmez</div>
-        <ul>
-          <li>Sipariş, ürün & stok yönetimi</li>
-          <li>Ayda 3 AI ürün ilanı</li>
-          <li>Ayda 5 AI soru cevabı</li>
-          <li>Ayda 30 yorum analizi</li>
-          <li>1 pazaryeri bağlantısı</li>
-        </ul>
-        <a class="btn ghost" href="/auth?plan=free">Hemen Başla</a>
+      <div class="plan-wrap reveal">
+        <div class="plan-aura" aria-hidden="true"></div>
+        <div class="plan">
+          <h3>Ücretsiz</h3>
+          <div class="price">₺0</div>
+          <div class="per">denemek için — kart gerekmez</div>
+          <ul>
+            <li>Sipariş, ürün & stok yönetimi</li>
+            <li>Ayda 3 AI ürün ilanı</li>
+            <li>Ayda 5 AI soru cevabı</li>
+            <li>Ayda 30 yorum analizi</li>
+            <li>1 pazaryeri bağlantısı</li>
+          </ul>
+          <a class="btn ghost" href="/auth?plan=free">Hemen Başla</a>
+        </div>
       </div>
-      <div class="plan reveal">
-        <h3>Başlangıç</h3>
-        <div class="price">₺299</div>
-        <div class="per">aylık — büyüyen mağazalar</div>
-        <ul>
-          <li>Stok alarm sistemi</li>
-          <li>Ayda 30 AI ilan + 100 AI cevap</li>
-          <li>Finans modülü (hakediş & komisyon)</li>
-          <li>İade yönetimi ve kargo takibi</li>
-          <li>2 pazaryeri bağlantısı</li>
-        </ul>
-        <a class="btn ghost" href="/auth?plan=starter">Bu Paketi Seç</a>
+      <div class="plan-wrap reveal">
+        <div class="plan-aura" aria-hidden="true"></div>
+        <div class="plan">
+          <h3>Başlangıç</h3>
+          <div class="price">₺299</div>
+          <div class="per">aylık — büyüyen mağazalar</div>
+          <ul>
+            <li>Stok alarm sistemi</li>
+            <li>Ayda 30 AI ilan + 100 AI cevap</li>
+            <li>Finans modülü (hakediş & komisyon)</li>
+            <li>İade yönetimi ve kargo takibi</li>
+            <li>2 pazaryeri bağlantısı</li>
+          </ul>
+          <a class="btn ghost" href="/auth?plan=starter">Bu Paketi Seç</a>
+        </div>
       </div>
-      <div class="plan hot reveal">
-        <h3>Profesyonel</h3>
-        <div class="price">₺699</div>
-        <div class="per">aylık — tam otomasyon</div>
-        <ul>
-          <li>Başlangıç'taki her şey</li>
-          <li>Buybox Tracker + AI dinamik fiyat</li>
-          <li>Sınırsız AI cevap ve içgörü</li>
-          <li>Satış & kârlılık analitiği</li>
-          <li>Ayda 200 AI ilan + 200 görsel</li>
-          <li>5 pazaryeri bağlantısı</li>
-        </ul>
-        <a class="btn primary" href="/auth?plan=pro">Bu Paketi Seç</a>
+      <div class="plan-wrap reveal">
+        <div class="plan-aura" aria-hidden="true"></div>
+        <div class="plan hot">
+          <h3>Profesyonel</h3>
+          <div class="price">₺699</div>
+          <div class="per">aylık — tam otomasyon</div>
+          <ul>
+            <li>Başlangıç'taki her şey</li>
+            <li>Buybox Tracker + AI dinamik fiyat</li>
+            <li>Sınırsız AI cevap ve içgörü</li>
+            <li>Satış & kârlılık analitiği</li>
+            <li>Ayda 200 AI ilan + 200 görsel</li>
+            <li>5 pazaryeri bağlantısı</li>
+          </ul>
+          <a class="btn primary" href="/auth?plan=pro">Bu Paketi Seç</a>
+        </div>
       </div>
-      <div class="plan reveal">
-        <h3>Kurumsal</h3>
-        <div class="price">₺1999</div>
-        <div class="per">aylık — yüksek hacim & ajanslar</div>
-        <ul>
-          <li>Sınırsız AI ilan, görsel ve içgörü</li>
-          <li>Sınırsız pazaryeri bağlantısı</li>
-          <li>Tüm analitik modülleri</li>
-          <li>Öncelikli destek</li>
-        </ul>
-        <a class="btn ghost" href="/auth?plan=enterprise">Bu Paketi Seç</a>
+      <div class="plan-wrap reveal">
+        <div class="plan-aura" aria-hidden="true"></div>
+        <div class="plan">
+          <h3>Kurumsal</h3>
+          <div class="price">₺1999</div>
+          <div class="per">aylık — yüksek hacim & ajanslar</div>
+          <ul>
+            <li>Sınırsız AI ilan, görsel ve içgörü</li>
+            <li>Sınırsız pazaryeri bağlantısı</li>
+            <li>Tüm analitik modülleri</li>
+            <li>Öncelikli destek</li>
+          </ul>
+          <a class="btn ghost" href="/auth?plan=enterprise">Bu Paketi Seç</a>
+        </div>
       </div>
     </div>
   </div>

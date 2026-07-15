@@ -9,15 +9,18 @@
   (function () {
     const t = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     document.documentElement.dataset.theme = t;
+    const lang = localStorage.getItem('lang') === 'en' ? 'en' : 'tr';
+    document.documentElement.lang = lang;
   })();
-  function toggleTheme() {
+  function toggleTheme(force) {
     const h = document.documentElement;
-    h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+    if (force === 'light' || force === 'dark') h.dataset.theme = force;
+    else h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
     localStorage.setItem('theme', h.dataset.theme);
-    const b = document.getElementById('themeLbl');
-    if (b) b.textContent = h.dataset.theme === 'dark' ? 'Aydınlık mod' : 'Karanlık mod';
+    if (typeof syncThemeButtons === 'function') syncThemeButtons();
   }
 </script>
+<script src="/static/i18n.js?v=202607151200"></script>
 <link rel="stylesheet" href="/static/trendol-theme.css?v=202607074400">
 <style>
   :root {
@@ -272,32 +275,35 @@
   .side-foot { position: relative; border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 2px; }
   .side-foot .settings-btn { padding: 7px 11px; font-size: 14px; gap: 9px; }
   .side-foot .settings-btn .sic { width: 18px; font-size: 14px; }
-  .settings-pop {
-    position: absolute;
-    left: 0; right: 0;
-    bottom: calc(100% + 6px);
-    background: var(--card2, #1a1628);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 6px;
-    display: flex; flex-direction: column; gap: 2px;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
-    z-index: 60;
-    animation: settingsPop .18s ease;
+  .settings-page { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
+  .settings-sec-card { padding: 18px 20px; }
+  .settings-sec-title {
+    font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 12px;
   }
-  .settings-pop.hidden { display: none; }
-  @keyframes settingsPop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  .settings-item {
-    display: flex; align-items: center; gap: 9px;
-    padding: 9px 11px; border-radius: 9px;
-    border: 0; background: transparent; color: var(--muted);
-    font-size: 13.5px; font-weight: 600; font-family: inherit;
-    cursor: pointer; text-align: left; width: 100%; text-decoration: none;
-    transition: background .15s, color .15s;
+  .settings-options { display: flex; flex-direction: column; gap: 8px; }
+  .settings-options-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 640px) { .settings-options-row { grid-template-columns: 1fr; } }
+  .settings-opt {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 12px 14px; border-radius: 12px;
+    border: 1.5px solid var(--border); background: var(--card2);
+    color: var(--ink); font-size: 14px; font-weight: 650; font-family: inherit;
+    cursor: pointer; text-align: left; text-decoration: none;
+    transition: border-color .15s, background .15s, box-shadow .15s;
   }
-  .settings-item .sic { width: 19px; text-align: center; flex-shrink: 0; font-size: 15px; }
-  .settings-item:hover { background: rgba(139, 124, 246, 0.1); color: var(--ink); }
-  .settings-item.danger:hover { background: rgba(220, 60, 90, 0.14); color: #ff7a9c; }
+  .settings-opt .sic { width: 22px; text-align: center; flex-shrink: 0; }
+  .settings-opt:hover { border-color: rgba(139, 124, 246, 0.45); background: var(--lilac-soft); }
+  .settings-opt.on {
+    border-color: #86efac; background: #e5f7ec; color: #166534;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15);
+  }
+  html[data-theme="dark"] .settings-opt.on {
+    background: rgba(46, 160, 110, 0.2); color: #7dffa8; border-color: rgba(110, 231, 214, 0.4);
+  }
+  .settings-opt.danger { color: #c0355f; }
+  .settings-opt.danger:hover { background: var(--rose-soft); border-color: #f3cede; }
+  .settings-backdrop, .settings-panel, .settings-pop, .settings-item { display: none !important; }
   .wrap { max-width: 1120px; margin: 0 auto; }
   body.view-assistant .wrap { max-width: none; width: 100%; margin: 0; }
   body.view-assistant .main { padding: 8px 12px 40px; }
@@ -320,6 +326,22 @@
   html[data-theme="dark"] body.view-assistant .main { background: transparent; }
   .view-title { font-size: 21px; font-weight: 800; letter-spacing: -.4px; margin: 4px 0 2px; }
   .view-sub { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+  .view-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+  .view-back-btn {
+    flex-shrink: 0; width: 36px; height: 36px; margin-top: 2px; padding: 0;
+    border-radius: 11px; border: 1.5px solid var(--border);
+    background: var(--card); color: var(--ink); font-size: 18px; font-weight: 700;
+    line-height: 1; cursor: pointer; box-shadow: var(--shadow); font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .view-back-btn:hover {
+    transform: translateX(-2px); border-color: var(--lilac);
+    box-shadow: 0 4px 16px rgba(139,124,246,.16);
+  }
+  html[data-theme="dark"] .view-back-btn {
+    background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.12);
+  }
   .theme-btn {
     display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 10px;
     border: 0; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 650;
@@ -345,6 +367,8 @@
   .brand em { font-style: normal; color: var(--lilac); }
   header .sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .badges { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  body.has-store-pick .ord-filter-plat,
+  body.has-store-pick #prodPlatF { display: none !important; }
   .badge { font-size: 11.5px; font-weight: 600; padding: 4px 11px; border-radius: 999px; background: var(--peach-soft); color: #92500e; white-space: nowrap; }
   .badge.live { background: #e5f7ec; color: #166534; }
   .userchip { display: flex; align-items: center; gap: 8px; margin-left: 14px; }
@@ -1490,62 +1514,59 @@
 <aside class="sidebar" id="appSidebar">
   <a href="/" class="brand">
     <span class="mark">A</span>
-    <div>Analiz<em>Ai</em><div class="sub">E-ticaret paneli</div></div>
+    <div>Analiz<em>Ai</em><div class="sub" data-i18n="brandSub">E-ticaret paneli</div></div>
   </a>
   <nav class="snav">
-    <button type="button" class="sitem on" data-view="overview" onclick="switchView('overview')"><span class="sic">🏠</span>Genel Bakış</button>
+    <button type="button" class="sitem on" data-view="overview" onclick="switchView('overview')"><span class="sic">🏠</span><span data-i18n="navOverview">Genel Bakış</span></button>
 
     <div class="snav-group collapsed" data-group="ops" id="groupOps">
       <button type="button" class="sgroup-toggle" onclick="toggleNavGroup('ops')" aria-expanded="false">
-        <span>Operasyon</span><span class="sgroup-chevron">▼</span>
+        <span data-i18n="navOps">Operasyon</span><span class="sgroup-chevron">▼</span>
       </button>
       <div class="sgroup-items">
-        <button type="button" class="sitem" data-view="orders" onclick="switchView('orders')"><span class="sic">🧾</span>Siparişler</button>
-        <button type="button" class="sitem" data-view="products" onclick="switchView('products')"><span class="sic">📦</span>Ürünler &amp; Stok</button>
-        <button type="button" class="sitem" data-view="questions" onclick="switchView('questions')"><span class="sic">💬</span>Sorular<span class="cnt" id="qCount" style="display:none"></span></button>
-        <button type="button" class="sitem" data-view="claims" onclick="switchView('claims')"><span class="sic">↩️</span>İade &amp; Tazmin<span class="cnt" id="clCount" style="display:none"></span></button>
-        <button type="button" class="sitem" data-view="finance" onclick="switchView('finance')"><span class="sic">💰</span>Finans</button>
+        <button type="button" class="sitem" data-view="orders" onclick="switchView('orders')"><span class="sic">🧾</span><span data-i18n="navOrders">Siparişler</span></button>
+        <button type="button" class="sitem" data-view="products" onclick="switchView('products')"><span class="sic">📦</span><span data-i18n="navProducts">Ürünler &amp; Stok</span></button>
+        <button type="button" class="sitem" data-view="questions" onclick="switchView('questions')"><span class="sic">💬</span><span data-i18n="navQuestions">Sorular</span><span class="cnt" id="qCount" style="display:none"></span></button>
+        <button type="button" class="sitem" data-view="claims" onclick="switchView('claims')"><span class="sic">↩️</span><span data-i18n="navClaims">İade &amp; Tazmin</span><span class="cnt" id="clCount" style="display:none"></span></button>
+        <button type="button" class="sitem" data-view="finance" onclick="switchView('finance')"><span class="sic">💰</span><span data-i18n="navFinance">Finans</span></button>
       </div>
     </div>
 
     <div class="snav-group collapsed" data-group="depo" id="groupDepo">
       <button type="button" class="sgroup-toggle" onclick="toggleNavGroup('depo')" aria-expanded="false">
-        <span>Depo</span><span class="sgroup-chevron">▼</span>
+        <span data-i18n="navWarehouse">Depo</span><span class="sgroup-chevron">▼</span>
       </button>
       <div class="sgroup-items">
-        <button type="button" class="sitem" data-view="warehouse" onclick="switchView('warehouse')"><span class="sic">📦</span>Depodaki Ürünlerim</button>
+        <button type="button" class="sitem" data-view="warehouse" onclick="switchView('warehouse')"><span class="sic">📦</span><span data-i18n="navWarehouseItems">Depodaki Ürünlerim</span></button>
       </div>
     </div>
 
     <div class="snav-group collapsed" data-group="ai" id="groupAi">
       <button type="button" class="sgroup-toggle" onclick="toggleNavGroup('ai')" aria-expanded="false">
-        <span>AI Araçları</span><span class="sgroup-chevron">▼</span>
+        <span data-i18n="navAi">AI Araçları</span><span class="sgroup-chevron">▼</span>
       </button>
       <div class="sgroup-items">
-        <button type="button" class="sitem" data-view="listing" onclick="switchView('listing')"><span class="sic">✨</span>AI Ürün Ekleme</button>
-        <button type="button" class="sitem" data-view="buybox" onclick="switchView('buybox')"><span class="sic">🏆</span>Buybox &amp; Fiyat</button>
-        <button type="button" class="sitem" data-view="assistant" onclick="switchView('assistant')"><span class="sic">🤖</span>Analiz</button>
-        <button type="button" class="sitem" data-view="analytics" onclick="switchView('analytics')"><span class="sic">📈</span>Satış Analizi</button>
+        <button type="button" class="sitem" data-view="listing" onclick="switchView('listing')"><span class="sic">✨</span><span data-i18n="navListing">AI Ürün Ekleme</span></button>
+        <button type="button" class="sitem" data-view="buybox" onclick="switchView('buybox')"><span class="sic">🏆</span><span data-i18n="navBuybox">Buybox &amp; Fiyat</span></button>
+        <button type="button" class="sitem" data-view="assistant" onclick="switchView('assistant')"><span class="sic">🤖</span><span data-i18n="navAssistant">Analiz</span></button>
+        <button type="button" class="sitem" data-view="analytics" onclick="switchView('analytics')"><span class="sic">📈</span><span data-i18n="navAnalytics">Satış Analizi</span></button>
       </div>
     </div>
   </nav>
   <div class="side-foot">
-    <div class="settings-pop hidden" id="settingsPop" role="menu">
-      <button type="button" class="settings-item" onclick="toggleTheme()"><span class="sic">🌓</span><span id="themeLbl">Karanlık mod</span></button>
-      <button type="button" class="settings-item" data-view="support" onclick="switchView('support'); closeSettings()"><span class="sic">💌</span>Destek</button>
-      <a href="/account" class="settings-item" style="text-decoration:none"><span class="sic">👤</span>Hesabım</a>
-      <button type="button" class="settings-item danger" onclick="doLogout()"><span class="sic">⎋</span>Çıkış</button>
-    </div>
-    <button type="button" class="sitem settings-btn" id="settingsToggle" onclick="toggleSettings(event)" aria-haspopup="true" aria-expanded="false"><span class="sic">⚙️</span>Ayarlar</button>
+    <button type="button" class="sitem settings-btn" id="settingsToggle" data-view="settings" onclick="switchView('settings')"><span class="sic">⚙️</span><span data-i18n="settings">Ayarlar</span></button>
   </div>
 </aside>
 
 <div class="main">
 <div class="wrap">
   <header class="rise">
-    <div>
-      <div class="view-title" id="viewTitle">Genel Bakış</div>
-      <p class="view-sub" id="viewSub">Tüm mağazalarının bugünkü durumu</p>
+    <div class="view-head">
+      <button type="button" id="viewBackBtn" class="view-back-btn hidden" aria-label="Geri" title="Geri">←</button>
+      <div>
+        <div class="view-title" id="viewTitle">Genel Bakış</div>
+        <p class="view-sub" id="viewSub">Tüm mağazalarının bugünkü durumu</p>
+      </div>
     </div>
     <div class="badges" id="badges"></div>
     <div class="userchip" id="userChip" style="display:none">
@@ -1616,7 +1637,7 @@
             <option value="Cancelled">İptal</option>
           </select>
         </label>
-        <label class="ord-filter"><span class="ord-filter-lbl">Platform</span>
+        <label class="ord-filter ord-filter-plat"><span class="ord-filter-lbl">Platform</span>
           <select id="ordPlatF" onchange="loadOrders()"><option value="">Hepsi</option></select>
         </label>
         <label class="ord-filter"><span class="ord-filter-lbl">Tarih aralığı</span>
@@ -1966,6 +1987,39 @@
     </div>
   </div>
 
+  <!-- AYARLAR -->
+  <div id="viewSettings" class="hidden">
+    <div class="settings-page">
+      <section class="card settings-sec-card">
+        <h3 class="settings-sec-title" data-i18n="secAppearance">Görünüm</h3>
+        <div class="settings-options settings-options-row">
+          <button type="button" class="settings-opt" id="themeLightBtn" onclick="setThemeMode('light')"><span class="sic">☀️</span><span data-i18n="themeLight">Aydınlık mod</span></button>
+          <button type="button" class="settings-opt" id="themeDarkBtn" onclick="setThemeMode('dark')"><span class="sic">🌙</span><span data-i18n="themeDark">Karanlık mod</span></button>
+        </div>
+      </section>
+      <section class="card settings-sec-card">
+        <h3 class="settings-sec-title" data-i18n="secLanguage">Dil</h3>
+        <div class="settings-options settings-options-row">
+          <button type="button" class="settings-opt" id="langTrBtn" onclick="setAppLang('tr')"><span class="sic">🇹🇷</span><span data-i18n="langTr">Türkçe</span></button>
+          <button type="button" class="settings-opt" id="langEnBtn" onclick="setAppLang('en')"><span class="sic">🇬🇧</span><span data-i18n="langEn">English</span></button>
+        </div>
+      </section>
+      <section class="card settings-sec-card">
+        <h3 class="settings-sec-title" data-i18n="secSupport">Destek & hesap</h3>
+        <div class="settings-options settings-options-row">
+          <button type="button" class="settings-opt" onclick="switchView('support')"><span class="sic">💌</span><span data-i18n="support">Destek</span></button>
+          <a href="/account" class="settings-opt"><span class="sic">👤</span><span data-i18n="account">Hesabım</span></a>
+        </div>
+      </section>
+      <section class="card settings-sec-card">
+        <h3 class="settings-sec-title" data-i18n="secLogout">Oturum</h3>
+        <div class="settings-options">
+          <button type="button" class="settings-opt danger" onclick="doLogout()"><span class="sic">⎋</span><span data-i18n="logout">Hesaptan çıkış yap</span></button>
+        </div>
+      </section>
+    </div>
+  </div>
+
   <!-- DESTEK -->
   <div id="viewSupport" class="hidden">
     <div class="card support-form" style="max-width:560px">
@@ -2033,25 +2087,46 @@ async function api(url, opts) {
 let currentUser = null;
 async function doLogout() { await fetch('/api/auth/logout', { method: 'POST' }); location.href = '/'; }
 
-function toggleSettings(e) {
-  if (e) e.stopPropagation();
-  const pop = document.getElementById('settingsPop');
-  const btn = document.getElementById('settingsToggle');
-  if (!pop) return;
-  const nowHidden = pop.classList.toggle('hidden');
-  btn?.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
+function setThemeMode(mode) {
+  toggleTheme(mode);
 }
-function closeSettings() {
-  const pop = document.getElementById('settingsPop');
-  if (pop && !pop.classList.contains('hidden')) {
-    pop.classList.add('hidden');
-    document.getElementById('settingsToggle')?.setAttribute('aria-expanded', 'false');
+function syncThemeButtons() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  $('themeLightBtn')?.classList.toggle('on', !dark);
+  $('themeDarkBtn')?.classList.toggle('on', dark);
+}
+function syncLangButtons() {
+  const lang = (window.I18N && I18N.getLang()) || 'tr';
+  $('langTrBtn')?.classList.toggle('on', lang === 'tr');
+  $('langEnBtn')?.classList.toggle('on', lang === 'en');
+}
+function setAppLang(lang) {
+  if (!window.I18N) return;
+  I18N.setLang(lang);
+  syncLangButtons();
+  toast(lang === 'en' ? I18N.t('langChanged') : I18N.t('langChangedTr'), 'ok');
+}
+window.applyPanelI18n = function applyPanelI18n() {
+  if (!window.I18N) return;
+  Object.keys(VIEWS).forEach(key => {
+    const v = VIEWS[key];
+    const title = I18N.t('view.' + key + '.title');
+    const sub = I18N.t('view.' + key + '.sub');
+    if (title && title.indexOf('view.') !== 0) v.title = title;
+    if (sub && sub.indexOf('view.') !== 0) v.sub = sub;
+  });
+  I18N.applyDom();
+  const cur = VIEWS[currentViewName];
+  if (cur) {
+    if ($('viewTitle')) $('viewTitle').textContent = cur.title;
+    if ($('viewSub')) $('viewSub').textContent = cur.sub;
+    if (typeof updateViewSubForStore === 'function') updateViewSubForStore();
   }
-}
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.side-foot')) closeSettings();
-});
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
+  syncThemeButtons();
+  syncLangButtons();
+};
+
+function closeSettings() { /* sekme görünümü — kapatılacak popup yok */ }
 api('/api/auth/me').then(u => {
   if (!u.email_verified) { location.href = '/auth/verify-pending'; return; }
   currentUser = u;
@@ -2074,9 +2149,11 @@ const VIEWS = {
   assistant: { el: 'viewAssistant', title: 'Analiz',            sub: 'Yorum, iade ve kargo verilerine göre kanıt odaklı öneriler', load: () => { if (!assistantLoaded && typeof loadAssistant === 'function') { loadAssistant(); assistantLoaded = true; } } },
   analytics: { el: 'viewAnalytics', title: 'Satış Analizi',     sub: 'Sipariş CSV\'nden ciro ve kârlılık raporu', load: () => { if (!analyticsLoaded) { loadAnalytics(); analyticsLoaded = true; } } },
   support:   { el: 'viewSupport',   title: 'Destek',            sub: 'E-posta ile destek ekibine ulaş', load: () => loadSupportForm() },
+  settings:  { el: 'viewSettings',  title: 'Ayarlar',           sub: 'Tema, dil ve hesap seçenekleri', load: () => { syncThemeButtons(); syncLangButtons(); } },
 };
 let assistantLoaded = false, analyticsLoaded = false;
 const loadedViews = new Set();
+let currentViewName = 'overview';
 
 const NAV_GROUPS = {
   ops: ['orders', 'products', 'questions', 'claims', 'finance'],
@@ -2118,6 +2195,7 @@ function switchView(name) {
   const v = VIEWS[name];
   if (!v) return;
   closeSidebar();
+  currentViewName = name;
   document.body.classList.toggle('view-assistant', name === 'assistant');
   if (NAV_GROUPS.ops.includes(name)) expandNavGroup('ops');
   if (NAV_GROUPS.depo.includes(name)) expandNavGroup('depo');
@@ -2126,18 +2204,91 @@ function switchView(name) {
   document.querySelectorAll('.sitem[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   $('viewTitle').textContent = v.title;
   $('viewSub').textContent = v.sub;
+  updateViewSubForStore();
+  if (typeof updateViewBackBtn === 'function') updateViewBackBtn();
   // Veri görünümleri her girişte tazelenir; asistan/analiz kendi tembel yükleme
   // bayraklarıyla (assistantLoaded/analyticsLoaded) tekrar yüklemeyi engeller.
   if (v.load) { loadedViews.add(name); v.load(); }
 }
 const switchTab = switchView; // eski çağrılarla uyumluluk
 
-// tema etiketi başlangıcı
-if (document.documentElement.dataset.theme === 'dark') {
-  const tl = $('themeLbl'); if (tl) tl.textContent = 'Aydınlık mod';
-}
+if (window.I18N) applyPanelI18n();
+else syncThemeButtons();
 
 const PLAT_NAMES = { trendyol: 'Trendyol', hepsiburada: 'Hepsiburada', n11: 'N11', amazon: 'Amazon TR' };
+let ACTIVE_STORE = '';
+let USER_STORES = [];
+
+function mpUrl(path, extra) {
+  const params = new URLSearchParams();
+  if (ACTIVE_STORE) params.set('platform', ACTIVE_STORE);
+  if (extra) Object.entries(extra).forEach(([k, v]) => {
+    if (v !== '' && v != null && v !== undefined) params.set(k, String(v));
+  });
+  const qs = params.toString();
+  return path + (qs ? '?' + qs : '');
+}
+
+function activeStoreLabel() {
+  const c = USER_STORES.find(s => s.platform === ACTIVE_STORE);
+  if (!c) return ACTIVE_STORE ? (PLAT_NAMES[ACTIVE_STORE] || ACTIVE_STORE) : 'Tüm mağazalar';
+  const name = PLAT_NAMES[c.platform] || c.platform;
+  return c.label ? name + ' · ' + c.label : name;
+}
+
+function updateViewSubForStore() {
+  const name = activeStoreLabel();
+  const subs = {
+    overview: ACTIVE_STORE ? name + ' mağazasının güncel durumu' : 'Tüm mağazalarının güncel durumu',
+    orders: ACTIVE_STORE ? name + ' siparişleri' : 'Tüm pazaryerlerinden gelen paketler',
+    products: ACTIVE_STORE ? name + ' ürün ve stokları' : 'Fiyat ve stokları buradan anında güncelle',
+    questions: ACTIVE_STORE ? name + ' müşteri soruları' : 'AI önerisiyle saniyeler içinde cevapla',
+    claims: ACTIVE_STORE ? name + ' iade talepleri' : 'AI önerir, siz onaylar veya düzenlersiniz — Trendyol’a sonra gider',
+    finance: ACTIVE_STORE ? name + ' hakediş ve komisyon' : 'Hakediş, komisyon ve net kazanç',
+    buybox: ACTIVE_STORE ? name + ' buybox ve fiyat' : 'Rakip fiyatlarını izle, AI ile fiyat öner',
+    listing: ACTIVE_STORE === 'amazon' ? 'Amazon için ilan akışı henüz yok — Trendyol seçin' : 'Fotoğraftan saniyeler içinde ilan hazırla',
+  };
+  const sub = subs[currentViewName];
+  if (sub && $('viewSub')) $('viewSub').textContent = sub;
+}
+
+function renderStoreBadges() {
+  const badges = $('badges');
+  if (!badges) return;
+  if (!USER_STORES.length) {
+    badges.innerHTML = '<span class="badge">' + ((window.I18N && I18N.t('noStore')) || 'Mağaza bağlı değil') + '</span>';
+    return;
+  }
+  const cur = USER_STORES.find(s => s.platform === ACTIVE_STORE) || USER_STORES[0];
+  const name = PLAT_NAMES[cur.platform] || cur.platform;
+  badges.innerHTML = '<span class="badge' + (cur.status === 'active' ? ' live' : '') + '">' + esc(name) +
+    (cur.status === 'active' ? '' : '') + '</span>';
+}
+
+async function initActiveStore() {
+  try {
+    const [settings, conns] = await Promise.all([
+      api('/api/mp/settings'),
+      api('/api/connections'),
+    ]);
+    USER_STORES = (conns || []).filter(c => PLAT_NAMES[c.platform]);
+    if (!USER_STORES.length) {
+      document.body.classList.remove('has-store-pick');
+      ACTIVE_STORE = '';
+      renderStoreBadges();
+      return;
+    }
+    document.body.classList.add('has-store-pick');
+    let preferred = settings.active_platform || '';
+    if (!USER_STORES.some(s => s.platform === preferred)) preferred = USER_STORES[0].platform;
+    ACTIVE_STORE = preferred;
+    renderStoreBadges();
+    updateViewSubForStore();
+  } catch (e) {
+    renderStoreBadges();
+  }
+}
+
 function platTag(p) {
   const colors = { trendyol: '#f27a1a', hepsiburada: '#ff6000', n11: '#5d3ebc', amazon: '#d18700' };
   return '<span class="plat-tag"><span class="plat-dot" style="background:' + (colors[p] || '#8b7cf6') + '"></span>' + (PLAT_NAMES[p] || p) + '</span>';
@@ -2367,7 +2518,7 @@ function bindOverviewDetailEvents() {
 
 async function loadOverview() {
   try {
-    const o = await api('/api/mp/overview');
+    const o = await api(mpUrl('/api/mp/overview'));
     const st = o.orders_by_status || {};
     const revPct = o.revenue_change_pct || 0;
     const qList = (o.recent_questions || []).length
@@ -2431,14 +2582,17 @@ async function loadOverview() {
 
     const activity = [...(o.recent_activity || [])];
     try {
-      const w = await api('/api/mp/webhooks');
-      (w.rows || []).slice(0, 2).forEach(h => activity.push({ type: 'webhook', id: h.url, status: 'active' }));
+      if (ACTIVE_STORE === 'trendyol' || !ACTIVE_STORE) {
+        const w = await api(mpUrl('/api/mp/webhooks'));
+        (w.rows || []).slice(0, 2).forEach(h => activity.push({ type: 'webhook', id: h.url, status: 'active' }));
+      }
     } catch (_) {}
     renderOverviewActivity(activity.slice(0, 8));
 
     const q = $('qCount'); q.style.display = o.waiting_questions ? '' : 'none'; q.textContent = o.waiting_questions;
     const c = $('clCount'); c.style.display = o.open_claims ? '' : 'none'; c.textContent = o.open_claims;
-    loadWebhooks();
+    if (ACTIVE_STORE === 'trendyol' || !ACTIVE_STORE) loadWebhooks();
+    else if ($('whList')) $('whList').innerHTML = '<p class="hint">Webhook yalnızca Trendyol mağazasında kullanılır.</p>';
   } catch (e) { toast(e.message); }
 }
 
@@ -2491,12 +2645,11 @@ function fillPlatFilter(selId, platforms) {
 
 async function loadOrders() {
   try {
-    const params = new URLSearchParams();
-    if ($('ordStatusF').value) params.set('status', $('ordStatusF').value);
-    if ($('ordPlatF').value) params.set('platform', $('ordPlatF').value);
+    const extra = {};
+    if ($('ordStatusF').value) extra.status = $('ordStatusF').value;
     const days = parseInt($('ordDaysF')?.value || '14', 10);
-    if (days) params.set('days', String(days));
-    const d = await api('/api/mp/orders?' + params);
+    if (days) extra.days = String(days);
+    const d = await api(mpUrl('/api/mp/orders', extra));
     demoNote('ordersNote', d.platforms);
     fillPlatFilter('ordPlatF', d.platforms);
     const head = '<thead><tr>' +
@@ -2526,9 +2679,7 @@ async function loadOrders() {
 let PRODUCTS = [];
 async function loadProducts() {
   try {
-    const params = new URLSearchParams();
-    if ($('prodPlatF').value) params.set('platform', $('prodPlatF').value);
-    const d = await api('/api/mp/products?' + params);
+    const d = await api(mpUrl('/api/mp/products'));
     demoNote('prodNote', d.platforms);
     fillPlatFilter('prodPlatF', d.platforms);
     PRODUCTS = d.rows;
@@ -2565,7 +2716,7 @@ async function savePriceStock(idx) {
 let QUESTIONS = [];
 async function loadQuestions() {
   try {
-    const d = await api('/api/mp/questions');
+    const d = await api(mpUrl('/api/mp/questions'));
     demoNote('qNote', d.platforms);
     QUESTIONS = d.rows;
     renderQuestions();
@@ -2682,7 +2833,7 @@ function renderClaimAiCell(c, idx) {
 
 async function loadClaims() {
   try {
-    const d = await api('/api/mp/claims');
+    const d = await api(mpUrl('/api/mp/claims'));
     demoNote('clNote', d.platforms);
     CLAIMS = d.rows || [];
     fillReturnPolicyForm(d.return_policy);
@@ -2788,7 +2939,7 @@ async function sendClaimDecision(idx, approve, reason, fromAi, aiReviewId) {
 // ================= FİNANS =================
 async function loadFinance() {
   try {
-    const d = await api('/api/mp/finance');
+    const d = await api(mpUrl('/api/mp/finance'));
     show('finLock', false); show('finBody', true);
     const t = d.totals;
     const finCards = [
@@ -2819,7 +2970,7 @@ async function loadFinance() {
 // ================= BUYBOX & FİYAT =================
 async function loadBuybox() {
   try {
-    const d = await api('/api/mp/buybox');
+    const d = await api(mpUrl('/api/mp/buybox'));
     show('bbLock', false); show('bbBody', true);
     const sel = $('bbPlat');
     if (!sel.options.length) {
@@ -2874,10 +3025,8 @@ async function suggestPrice(idx, btn) {
 }
 
 api('/api/status').then(s => {
-  const mk = (txt, live) => '<span class="badge' + (live ? ' live' : '') + '">' + txt + '</span>';
-  $('badges').innerHTML =
-    mk(s.trendyol_mode === 'mock' ? 'Trendyol: Bağlı değil' : 'Trendyol: Bağlı', s.trendyol_mode !== 'mock');
-}).catch(() => {});
+  initActiveStore();
+}).catch(() => { initActiveStore(); });
 
 // ================= SATIŞ ANALİZİ =================
 const fmtTL = n => '₺' + Number(n).toLocaleString('tr-TR', { maximumFractionDigits: 0 });
@@ -2964,15 +3113,44 @@ $('anlInsightBtn').onclick = async () => {
   $('anlInsightBtn').textContent = 'İçgörüleri Yenile';
 };
 
+let listingStep = 1;
 function setStep(n) {
+  listingStep = n;
   document.querySelectorAll('#stepper .step').forEach(s => {
     const i = +s.dataset.s;
     s.classList.toggle('active', i === n);
     s.classList.toggle('done', i < n);
   });
   document.querySelectorAll('#stepper .conn').forEach((c, idx) => c.classList.toggle('done', idx + 1 < n));
+  updateViewBackBtn();
 }
 setStep(1);
+
+function updateViewBackBtn() {
+  const btn = $('viewBackBtn');
+  if (!btn) return;
+  const showBtn = currentViewName === 'listing' && listingStep > 1;
+  btn.classList.toggle('hidden', !showBtn);
+}
+
+function listingGoBack() {
+  if (listingStep <= 1) return;
+  if (listingStep === 4) {
+    show('resultCard', false);
+    show('draftCard');
+    setStep(3);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  // 2 (analiz) veya 3 (taslak) → fotoğraf adımı
+  show('loadingCard', false);
+  show('draftCard', false);
+  show('resultCard', false);
+  show('uploadCard');
+  setStep(1);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+if ($('viewBackBtn')) $('viewBackBtn').onclick = listingGoBack;
 
 // ================= LİSTELEME =================
 const drop = $('drop'), fileInput = $('file');
